@@ -24,7 +24,8 @@ import (
 )
 
 type server struct {
-	db *sql.DB
+	db      *sql.DB
+	metrics *httpMetrics
 }
 
 func main() {
@@ -102,12 +103,13 @@ func main() {
 		}()
 	}
 
-	srv := &server{db: s.DB}
+	srv := &server{db: s.DB, metrics: newHTTPMetrics()}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		jsonOut(w, map[string]string{"status": "ok"})
 	})
 	mux.HandleFunc("GET /readyz", srv.ready)
+	mux.HandleFunc("GET /metrics", srv.metricsHandler)
 	mux.HandleFunc("GET /api/v1/version", func(w http.ResponseWriter, r *http.Request) {
 		jsonOut(w, buildinfo.Current())
 	})
@@ -122,7 +124,7 @@ func main() {
 
 	httpServer := &http.Server{
 		Addr:              listen,
-		Handler:           mux,
+		Handler:           srv.observeHTTP(mux),
 		ReadHeaderTimeout: envDuration("BBSINTEL_HTTP_READ_HEADER_TIMEOUT", 5*time.Second),
 		ReadTimeout:       envDuration("BBSINTEL_HTTP_READ_TIMEOUT", 15*time.Second),
 		WriteTimeout:      envDuration("BBSINTEL_HTTP_WRITE_TIMEOUT", 30*time.Second),
