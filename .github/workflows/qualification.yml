@@ -1,0 +1,100 @@
+name: Live qualification
+
+on:
+  workflow_dispatch:
+    inputs:
+      probe_limit:
+        description: Maximum endpoints to probe after live imports
+        required: false
+        default: '20'
+
+permissions:
+  contents: read
+
+jobs:
+  qualify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.x'
+      - run: go build -o bbsintel ./cmd/bbsintel
+      - name: Import Telnet BBS Guide
+        env:
+          BBSINTEL_DB: ${{ runner.temp }}/bbsintel.db
+        run: ./bbsintel import telnetbbsguide
+      - name: Import Synchronet
+        env:
+          BBSINTEL_DB: ${{ runner.temp }}/bbsintel.db
+        run: ./bbsintel import synchronet
+      - name: Inspect imported catalogue
+        env:
+          DB: ${{ runner.temp }}/bbsintel.db
+        run: |
+          python3 - <<'PY'
+          import os, sqlite3
+          db = sqlite3.connect(os.environ['DB'])
+          queries = {
+              'bbs': 'select count(*) from bbs',
+              'endpoints': 'select count(*) from endpoint',
+              'telnet': "select count(*) from endpoint where protocol='telnet'",
+              'ssh': "select count(*) from endpoint where protocol='ssh'",
+              'sources': 'select count(distinct source) from source_entry where active=1',
+              'multi_source_bbs': '''select count(*) from (select bbs_id from source_entry where active=1 group by bbs_id having count(distinct source)>1)''',
+          }
+          for name, query in queries.items():
+              print(f'{name}={db.execute(query).fetchone()[0]}')
+          health = db.execute('select source,last_entry_count,consecutive_failures from source_health order by source').fetchall()
+          print('source_health=', health)
+          PY
+      - name: Limit qualification probe set
+        env:
+          DB: ${{ runner.temp }}/bbsintel.db
+          PROBE_LIMIT: ${{ inputs.probe_limit }}
+        run: |
+          python3 - <<'PY'
+          import os, sqlite3
+          limit = max(1, min(int(os.environ.get('PROBE_LIMIT') or '20'), 100))
+          db = sqlite3.connect(os.environ['DB'])
+          keep = [r[0] for r in db.execute("select id from endpoint where protocol in ('telnet','ssh') order by id limit ?", (limit,))]
+          if keep:
+              marks = ','.join('?' for _ in keep)
+              db.execute(f'delete from endpoint where id not in ({marks})', keep)
+              db.commit()
+          print(f'qualification_probe_endpoints={len(keep)}')
+          PY
+      - name: Passive probe sample
+        env:
+          BBSINTEL_DB: ${{ runner.temp }}/bbsintel.db
+          BBSINTEL_PROBE_CONCURRENCY: '4'
+          BBSINTEL_PROBE_INTERVAL: '1m'
+        run: ./bbsintel probe
+      - name: Inspect probe results
+        env:
+          DB: ${{ runner.temp }}/bbsintel.db
+        run: |
+          python3 - <<'PY'
+          import os, sqlite3
+          db = sqlite3.connect(os.environ['DB'])
+          print('probe_statuses=', db.execute('select status,count(*) from probe_result group by status order by status').fetchall())
+          print('fingerprints=', db.execute("select detected_software,count(*) from probe_result where detected_software<>'' group by detected_software order by count(*) desc").fetchall())
+          PY
+      - name: API smoke
+        env:
+          BBSINTEL_DB: ${{ runner.temp }}/bbsintel.db
+          BBSINTEL_LISTEN: 127.0.0.1:18080
+          BBSINTEL_SCHEDULER_ENABLED: 'false'
+        run: |
+          ./bbsintel >/tmp/bbsintel.log 2>&1 &
+          pid=$!
+          trap 'kill $pid || true' EXIT
+          for i in $(seq 1 20); do
+            curl -fsS http://127.0.0.1:18080/healthz && break
+            sleep 0.5
+          done
+          curl -fsS http://127.0.0.1:18080/api/v1/stats
+          curl -fsS 'http://127.0.0.1:18080/api/v1/events?limit=5'
+          curl -fsS 'http://127.0.0.1:18080/api/v1/alerts?limit=5'
+          curl -fsS http://127.0.0.1:18080/api/v1/sources/health
