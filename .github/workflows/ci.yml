@@ -21,3 +21,5 @@ jobs:
       - run: go test ./...
       - run: go build ./cmd/bbsintel
       - run: docker build -t bbsintel:test .
+      - run: BBSINTEL_DOMAIN=localhost docker compose config --quiet
+      - run: docker run --rm -e BBSINTEL_DOMAIN=localhost -v "$PWD/Caddyfile:/etc/caddy/Caddyfile:ro" caddy:2-alpine caddy validate --config /etc/caddy/Caddyfile
