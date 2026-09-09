@@ -1,7 +1,3 @@
-{
-    email {$CADDY_EMAIL:}
-}
-
 {$BBSINTEL_DOMAIN:localhost} {
     encode zstd gzip
 
