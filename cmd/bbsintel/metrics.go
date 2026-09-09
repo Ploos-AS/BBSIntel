@@ -1,7 +1,6 @@
 package main
 
 import (
-	"database/sql"
 	"fmt"
 	"net/http"
 	"sort"
@@ -122,7 +121,7 @@ func (s *server) metricsHandler(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, "bbsintel_endpoints %d\n", snapshot.Endpoints)
 		fmt.Fprintln(w, "# HELP bbsintel_probes_retained Raw probe rows currently retained.")
 		fmt.Fprintln(w, "# TYPE bbsintel_probes_retained gauge")
-		fmt.Fprintf(w, "bbsintel_probes_retained %d\n", snapshot.ProbesRetained)
+		fmt.Fprintf(w, "bbsintel_probes_retained %d\n", snapshot.Probes)
 		fmt.Fprintln(w, "# HELP bbsintel_software_mismatches Current reported/observed software mismatches.")
 		fmt.Fprintln(w, "# TYPE bbsintel_software_mismatches gauge")
 		fmt.Fprintf(w, "bbsintel_software_mismatches %d\n", snapshot.SoftwareMismatches)
@@ -229,5 +228,3 @@ func (s *server) writeHTTPMetrics(w http.ResponseWriter) {
 		fmt.Fprintf(w, "bbsintel_http_request_duration_seconds_count{%s} %d\n", labels, v.Requests)
 	}
 }
-
-var _ *sql.DB
