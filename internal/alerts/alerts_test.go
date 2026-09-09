@@ -75,4 +75,23 @@ func TestListProjectsCurrentAndDeduplicatedAlerts(t *testing.T) {
 	if len(highOnly) != 2 {
 		t.Fatalf("high alerts=%d, want 2", len(highOnly))
 	}
+
+	missingOnly, err := alerts.Query(context.Background(), s.DB, alerts.Filter{Category: "source_missing", Source: "GUIDE", BBSID: bbsID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(missingOnly) != 1 || missingOnly[0].Category != "source_missing" {
+		t.Fatalf("filtered alerts=%#v, want one source_missing", missingOnly)
+	}
+
+	stats, err := alerts.Summarize(context.Background(), s.DB, alerts.Filter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.Total != 4 || stats.BySeverity["high"] != 2 || stats.BySeverity["warning"] != 1 || stats.BySeverity["info"] != 1 {
+		t.Fatalf("stats=%#v", stats)
+	}
+	if stats.ByCategory["software_change"] != 1 || stats.ByCategory["endpoint_status"] != 1 || stats.BySource["guide"] != 2 {
+		t.Fatalf("stats breakdown=%#v", stats)
+	}
 }
