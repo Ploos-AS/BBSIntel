@@ -26,17 +26,17 @@ type Summary struct {
 }
 
 type HistoryEntry struct {
-	EndpointID        int64   `json:"endpoint_id"`
-	Protocol          string  `json:"protocol"`
-	Hostname          string  `json:"hostname"`
-	Port              int     `json:"port"`
-	CheckedAt         string  `json:"checked_at"`
-	Status            string  `json:"status"`
-	ConnectMS         int64   `json:"connect_ms"`
-	BannerBytes       int     `json:"banner_bytes"`
-	ObservedSoftware  string  `json:"observed_software"`
+	EndpointID         int64   `json:"endpoint_id"`
+	Protocol           string  `json:"protocol"`
+	Hostname           string  `json:"hostname"`
+	Port               int     `json:"port"`
+	CheckedAt          string  `json:"checked_at"`
+	Status             string  `json:"status"`
+	ConnectMS          int64   `json:"connect_ms"`
+	BannerBytes        int     `json:"banner_bytes"`
+	ObservedSoftware   string  `json:"observed_software"`
 	SoftwareConfidence float64 `json:"software_confidence"`
-	Error             string  `json:"error,omitempty"`
+	Error              string  `json:"error,omitempty"`
 }
 
 func ForBBS(ctx context.Context, db *sql.DB, bbsID string, now time.Time) (Summary, error) {
