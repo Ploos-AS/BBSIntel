@@ -45,7 +45,8 @@ func main() {
 
 	if len(os.Args) >= 2 && os.Args[1] == "probe" {
 		concurrency := envInt("BBSINTEL_PROBE_CONCURRENCY", 8)
-		n, err := (probe.Worker{DB: s.DB, Concurrency: concurrency}).Run(context.Background())
+		baseInterval := envDuration("BBSINTEL_PROBE_INTERVAL", 30*time.Minute)
+		n, err := (probe.Worker{DB: s.DB, Concurrency: concurrency, BaseInterval: baseInterval}).Run(context.Background())
 		if err != nil {
 			log.Fatal(err)
 		}
