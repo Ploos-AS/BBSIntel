@@ -39,17 +39,21 @@ func (w Worker) Run(ctx context.Context) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	defer rows.Close()
 
 	var endpoints []Endpoint
 	for rows.Next() {
 		var e Endpoint
 		if err := rows.Scan(&e.ID, &e.Protocol, &e.Hostname, &e.Port); err != nil {
+			rows.Close()
 			return 0, err
 		}
 		endpoints = append(endpoints, e)
 	}
 	if err := rows.Err(); err != nil {
+		rows.Close()
+		return 0, err
+	}
+	if err := rows.Close(); err != nil {
 		return 0, err
 	}
 
