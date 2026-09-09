@@ -22,7 +22,10 @@ func TestRefreshAndPrune(t *testing.T) {
 	if _, err := s.DB.ExecContext(ctx, `INSERT INTO endpoint(id,bbs_id,protocol,hostname,port) VALUES(1,1,'telnet','example.test',23)`); err != nil {
 		t.Fatal(err)
 	}
-	for _, row := range []struct{ at, status string; ms any }{
+	for _, row := range []struct {
+		at, status string
+		ms         any
+	}{
 		{"2026-09-08 10:05:00", "online", 10},
 		{"2026-09-08 10:35:00", "telnet_only", 20},
 		{"2026-09-08 11:05:00", "offline", nil},
