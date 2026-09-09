@@ -90,6 +90,8 @@ func main() {
 	mux.HandleFunc("GET /api/v1/stats", srv.stats)
 	registerAnalyticsRoutes(mux, srv)
 	registerSourceRoutes(mux, srv)
+	registerIntelRoutes(mux, srv)
+	registerEventRoutes(mux, srv)
 
 	httpServer := &http.Server{Addr: listen, Handler: mux, ReadHeaderTimeout: 5 * time.Second}
 	go func() {
