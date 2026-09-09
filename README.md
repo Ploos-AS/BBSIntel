@@ -9,6 +9,8 @@ It aggregates public BBS directories, normalizes and deduplicates entries, probe
 - Go service
 - SQLite persistence
 - source-adapter model
+- multiple public BBS directory sources
+- cross-source endpoint deduplication
 - Telnet and SSH endpoint probing
 - Telnet banner cleanup and software fingerprinting
 - reported vs observed software provenance
@@ -20,6 +22,17 @@ It aggregates public BBS directories, normalizes and deduplicates entries, probe
 - OCI image
 - Docker Compose
 - GitHub Actions CI
+
+## Directory sources
+
+The built-in scheduler currently imports:
+
+- Telnet BBS Guide — advertised Telnet and SSH endpoints
+- Synchronet official BBS list — advertised Telnet and SSH endpoints from `synchro.net/sbbslist.html`
+
+Each source keeps its own `source_entry` provenance. When two directories advertise the same protocol/hostname/port, BBSIntel reuses the existing BBS identity instead of moving the endpoint or creating an orphaned duplicate. Multiple terminal protocols from one source row may share one source key and attach to the same BBS.
+
+Directory imports are independent: one source failing does not prevent the other configured sources from being attempted.
 
 ## Status model
 
@@ -36,7 +49,7 @@ Probing is intentionally passive. Telnet probes connect and read a bounded banne
 go run ./cmd/bbsintel
 ```
 
-The default server mode starts both the HTTP API and the scheduler. On startup the scheduler performs an import followed by a probe pass, then repeats imports every 24 hours and considers endpoints for probing every 30 minutes.
+The default server mode starts both the HTTP API and the scheduler. On startup the scheduler performs directory imports followed by a probe pass, then repeats imports every 24 hours and considers endpoints for probing every 30 minutes.
 
 Defaults: listen on `:8080`, database at `./data/bbsintel.db`.
 
@@ -64,13 +77,13 @@ A healthy result immediately resets the endpoint to the normal cadence. The norm
 
 Directory metadata remains separate from live observations:
 
-- `reported_software` — software claimed by a directory source
+- `reported_software` — canonical software metadata supplied by directory import
 - `observed_software` — software inferred from the latest live banner
 - `software_confidence` — confidence score for the observed fingerprint
 - `software_evidence` — banner token that produced the match
 - `software_mismatch` — true when reported and observed software disagree
 
-Observed values never overwrite source-reported values.
+Observed values never overwrite source-reported values. When multiple directory sources resolve to the same BBS, an existing non-empty canonical value is preserved rather than being overwritten by whichever source happens to run last.
 
 ## Uptime analytics
 
@@ -89,13 +102,11 @@ Status-change counts are calculated independently per endpoint so multiple proto
 
 ## One-shot commands
 
-Import BBS directory data:
+Import Telnet BBS Guide data:
 
 ```sh
 go run ./cmd/bbsintel import telnetbbsguide
 ```
-
-The Telnet BBS Guide adapter imports both advertised Telnet and SSH endpoints when present.
 
 Probe endpoints that are currently due:
 
@@ -109,7 +120,7 @@ Run only the scheduler without the HTTP API:
 go run ./cmd/bbsintel scheduler
 ```
 
-Imports are idempotent for known source entries and endpoints. Probe runs append to `probe_result`, building availability history instead of overwriting previous checks.
+The scheduler imports all configured directory adapters, including Synchronet. Imports are idempotent for known source entries and endpoints. Probe runs append to `probe_result`, building availability history instead of overwriting previous checks.
 
 ## API
 
