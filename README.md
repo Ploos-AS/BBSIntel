@@ -13,6 +13,7 @@ It aggregates public BBS directories, normalizes and deduplicates entries, probe
 - Telnet banner cleanup and software fingerprinting
 - reported vs observed software provenance
 - status history
+- sample-based uptime analytics
 - built-in scheduler
 - adaptive probe backoff
 - REST API
@@ -71,6 +72,21 @@ Directory metadata remains separate from live observations:
 
 Observed values never overwrite source-reported values.
 
+## Uptime analytics
+
+BBSIntel calculates sample-based uptime from stored probe results. `uptime_pct` is the percentage of completed probes in the requested window whose status was `online`; it is not presented as continuous time-weighted monitoring between probes.
+
+The analytics endpoint exposes:
+
+- `first_seen` and `last_seen`
+- `first_probe` and `last_probe`
+- `last_online`
+- `status_changes`
+- `uptime_24h`, `uptime_7d`, and `uptime_30d`
+- check counts and online-check counts for each uptime window
+
+Status-change counts are calculated independently per endpoint so multiple protocols on one BBS do not create artificial transitions.
+
 ## One-shot commands
 
 Import BBS directory data:
@@ -100,6 +116,8 @@ Imports are idempotent for known source entries and endpoints. Probe runs append
 - `GET /healthz`
 - `GET /api/v1/bbs` — BBS list including latest endpoint status and software provenance
 - `GET /api/v1/bbs/{id}` — BBS details and latest status/fingerprint for each endpoint
+- `GET /api/v1/bbs/{id}/analytics` — first/last observations, status changes, and 24h/7d/30d sample-based uptime
+- `GET /api/v1/bbs/{id}/history?limit=200` — newest probe history across the BBS endpoints; limit is capped at 1000
 - `GET /api/v1/stats` — inventory, probe count, latest-status totals, and software mismatch count
 
 ## Container
@@ -112,7 +130,7 @@ Persistent data lives under `/data` in the container. Compose enables the built-
 
 ## Roadmap
 
-Planned next steps include RLogin/raw-TCP probes, uptime analytics, additional BBS directory adapters, feeds, and a web UI.
+Planned next steps include RLogin/raw-TCP probes, additional BBS directory adapters, feeds, and a web UI.
 
 ## License
 
