@@ -56,16 +56,27 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	schedulerConfig := scheduler.Config{
+		ImportInterval: envDuration("BBSINTEL_IMPORT_INTERVAL", 24*time.Hour),
+		ProbeInterval:  envDuration("BBSINTEL_PROBE_INTERVAL", 30*time.Minute),
+		Concurrency:    envInt("BBSINTEL_PROBE_CONCURRENCY", 8),
+	}
+
 	if len(os.Args) >= 2 && os.Args[1] == "scheduler" {
-		err := (scheduler.Scheduler{DB: s.DB, Config: scheduler.Config{
-			ImportInterval: envDuration("BBSINTEL_IMPORT_INTERVAL", 24*time.Hour),
-			ProbeInterval:  envDuration("BBSINTEL_PROBE_INTERVAL", 30*time.Minute),
-			Concurrency:    envInt("BBSINTEL_PROBE_CONCURRENCY", 8),
-		}}).Run(ctx)
+		err := (scheduler.Scheduler{DB: s.DB, Config: schedulerConfig}).Run(ctx)
 		if err != nil && !errors.Is(err, context.Canceled) {
 			log.Fatal(err)
 		}
 		return
+	}
+
+	if envBool("BBSINTEL_SCHEDULER_ENABLED", true) {
+		go func() {
+			err := (scheduler.Scheduler{DB: s.DB, Config: schedulerConfig}).Run(ctx)
+			if err != nil && !errors.Is(err, context.Canceled) {
+				log.Printf("scheduler stopped: %v", err)
+			}
+		}()
 	}
 
 	srv := &server{db: s.DB}
@@ -120,6 +131,21 @@ func envDuration(k string, fallback time.Duration) time.Duration {
 		return fallback
 	}
 	return d
+}
+
+func envBool(k string, fallback bool) bool {
+	v := strings.TrimSpace(strings.ToLower(os.Getenv(k)))
+	if v == "" {
+		return fallback
+	}
+	switch v {
+	case "1", "true", "yes", "on":
+		return true
+	case "0", "false", "no", "off":
+		return false
+	default:
+		return fallback
+	}
 }
 
 func jsonOut(w http.ResponseWriter, v any) {
