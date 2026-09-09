@@ -7,6 +7,9 @@ on:
         description: Maximum endpoints to probe after live imports
         required: false
         default: '20'
+  push:
+    paths:
+      - '.github/workflows/qualification.yml'
 
 permissions:
   contents: read
@@ -15,21 +18,33 @@ jobs:
   qualify:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      BBSINTEL_DB: ${{ runner.temp }}/bbsintel.db
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version: '1.24.x'
       - run: go mod tidy && git diff --exit-code -- go.mod go.sum
+      - run: test -z "$(gofmt -l .)"
+      - run: go vet ./...
+      - run: go test ./...
       - run: go build -o bbsintel ./cmd/bbsintel
+
+      - name: Validate production Compose
+        env:
+          BBSINTEL_DOMAIN: localhost
+        run: docker compose config --quiet
+
+      - name: Validate Caddy configuration
+        run: docker run --rm -e BBSINTEL_DOMAIN=localhost -v "$PWD/Caddyfile:/etc/caddy/Caddyfile:ro" caddy:2-alpine caddy validate --config /etc/caddy/Caddyfile
+
       - name: Import Telnet BBS Guide
-        env:
-          BBSINTEL_DB: ${{ runner.temp }}/bbsintel.db
         run: ./bbsintel import telnetbbsguide
+
       - name: Import Synchronet
-        env:
-          BBSINTEL_DB: ${{ runner.temp }}/bbsintel.db
         run: ./bbsintel import synchronet
+
       - name: Inspect imported catalogue
         env:
           DB: ${{ runner.temp }}/bbsintel.db
@@ -46,32 +61,56 @@ jobs:
               'multi_source_bbs': '''select count(*) from (select bbs_id from source_entry where active=1 group by bbs_id having count(distinct source)>1)''',
           }
           for name, query in queries.items():
-              print(f'{name}={db.execute(query).fetchone()[0]}')
+              value = db.execute(query).fetchone()[0]
+              print(f'{name}={value}')
+              if name in ('bbs', 'endpoints', 'sources') and value <= 0:
+                  raise SystemExit(f'{name} unexpectedly empty')
           health = db.execute('select source,last_entry_count,consecutive_failures from source_health order by source').fetchall()
           print('source_health=', health)
+          if len(health) < 2 or any(row[2] != 0 for row in health):
+              raise SystemExit('source health qualification failed')
           PY
+
+      - name: Refresh public statistics and check database
+        run: |
+          ./bbsintel maintenance rollup
+          ./bbsintel maintenance check
+          ./bbsintel maintenance check full
+
+      - name: Online backup qualification
+        env:
+          BACKUP: ${{ runner.temp }}/bbsintel-backup.db
+        run: |
+          ./bbsintel maintenance backup "$BACKUP"
+          test -s "$BACKUP"
+
       - name: Limit qualification probe set
         env:
           DB: ${{ runner.temp }}/bbsintel.db
-          PROBE_LIMIT: ${{ inputs.probe_limit }}
+          PROBE_LIMIT: ${{ inputs.probe_limit || '20' }}
         run: |
           python3 - <<'PY'
           import os, sqlite3
           limit = max(1, min(int(os.environ.get('PROBE_LIMIT') or '20'), 100))
           db = sqlite3.connect(os.environ['DB'])
           keep = [r[0] for r in db.execute("select id from endpoint where protocol in ('telnet','ssh') order by id limit ?", (limit,))]
-          if keep:
-              marks = ','.join('?' for _ in keep)
-              db.execute(f'delete from endpoint where id not in ({marks})', keep)
-              db.commit()
+          if not keep:
+              raise SystemExit('no endpoints available for probe qualification')
+          marks = ','.join('?' for _ in keep)
+          db.execute(f'delete from endpoint where id not in ({marks})', keep)
+          db.commit()
           print(f'qualification_probe_endpoints={len(keep)}')
           PY
+
       - name: Passive probe sample
         env:
-          BBSINTEL_DB: ${{ runner.temp }}/bbsintel.db
           BBSINTEL_PROBE_CONCURRENCY: '4'
           BBSINTEL_PROBE_INTERVAL: '1m'
         run: ./bbsintel probe
+
+      - name: Refresh post-probe statistics
+        run: ./bbsintel maintenance rollup
+
       - name: Inspect probe results
         env:
           DB: ${{ runner.temp }}/bbsintel.db
@@ -79,12 +118,16 @@ jobs:
           python3 - <<'PY'
           import os, sqlite3
           db = sqlite3.connect(os.environ['DB'])
-          print('probe_statuses=', db.execute('select status,count(*) from probe_result group by status order by status').fetchall())
-          print('fingerprints=', db.execute("select detected_software,count(*) from probe_result where detected_software<>'' group by detected_software order by count(*) desc").fetchall())
+          statuses = db.execute('select status,count(*) from probe_result group by status order by status').fetchall()
+          fingerprints = db.execute("select detected_software,count(*) from probe_result where detected_software<>'' group by detected_software order by count(*) desc").fetchall()
+          print('probe_statuses=', statuses)
+          print('fingerprints=', fingerprints)
+          if not statuses or sum(row[1] for row in statuses) <= 0:
+              raise SystemExit('probe qualification produced no results')
           PY
-      - name: API smoke
+
+      - name: API and metrics smoke
         env:
-          BBSINTEL_DB: ${{ runner.temp }}/bbsintel.db
           BBSINTEL_LISTEN: 127.0.0.1:18080
           BBSINTEL_SCHEDULER_ENABLED: 'false'
         run: |
@@ -92,10 +135,27 @@ jobs:
           pid=$!
           trap 'kill $pid || true' EXIT
           for i in $(seq 1 20); do
-            curl -fsS http://127.0.0.1:18080/healthz && break
+            curl -fsS http://127.0.0.1:18080/readyz && break
             sleep 0.5
           done
+          curl -fsS http://127.0.0.1:18080/healthz
+          curl -fsS http://127.0.0.1:18080/readyz
+          curl -fsS http://127.0.0.1:18080/api/v1/version
           curl -fsS http://127.0.0.1:18080/api/v1/stats
+          curl -fsS 'http://127.0.0.1:18080/api/v1/bbs?limit=5'
           curl -fsS 'http://127.0.0.1:18080/api/v1/events?limit=5'
           curl -fsS 'http://127.0.0.1:18080/api/v1/alerts?limit=5'
           curl -fsS http://127.0.0.1:18080/api/v1/sources/health
+          curl -fsS 'http://127.0.0.1:18080/api/v1/statistics/daily?days=7'
+          curl -fsS http://127.0.0.1:18080/api/v1/statistics/dimensions/software
+          curl -fsS http://127.0.0.1:18080/api/v1/statistics/dimensions/protocol
+          curl -fsS http://127.0.0.1:18080/api/v1/statistics/dimensions/country
+          curl -fsS http://127.0.0.1:18080/api/v1/statistics/dimensions/source
+          curl -fsS 'http://127.0.0.1:18080/api/v1/statistics/lifecycle?days=30'
+          curl -fsS http://127.0.0.1:18080/metrics | tee /tmp/metrics.txt
+          grep -q '^bbsintel_build_info' /tmp/metrics.txt
+          grep -q '^bbsintel_database_up 1$' /tmp/metrics.txt
+          grep -q '^bbsintel_runtime_snapshot_age_seconds' /tmp/metrics.txt
+
+      - name: Final database integrity
+        run: ./bbsintel maintenance check full
