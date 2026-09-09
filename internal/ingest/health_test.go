@@ -11,10 +11,10 @@ import (
 	"github.com/Ploos-AS/BBSIntel/internal/store"
 )
 
-type failingAdapter struct{ err error }
+type healthFailingAdapter struct{ err error }
 
-func (a failingAdapter) Name() string { return "health-source" }
-func (a failingAdapter) Fetch(context.Context) ([]source.Entry, error) {
+func (a healthFailingAdapter) Name() string { return "health-source" }
+func (a healthFailingAdapter) Fetch(context.Context) ([]source.Entry, error) {
 	return nil, a.err
 }
 
@@ -26,7 +26,7 @@ func TestImportRecordsSourceHealthAndRecovery(t *testing.T) {
 	defer s.Close()
 
 	boom := errors.New("directory unavailable")
-	if _, err := ingest.Import(context.Background(), s.DB, failingAdapter{err: boom}); !errors.Is(err, boom) {
+	if _, err := ingest.Import(context.Background(), s.DB, healthFailingAdapter{err: boom}); !errors.Is(err, boom) {
 		t.Fatalf("failure err=%v, want %v", err, boom)
 	}
 
