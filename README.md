@@ -13,6 +13,7 @@ It aggregates public BBS directories, normalizes and deduplicates entries, probe
 - cross-source endpoint deduplication
 - Telnet and SSH endpoint probing
 - Telnet banner cleanup and software fingerprinting
+- full per-source metadata provenance
 - reported vs observed software provenance
 - status history
 - sample-based uptime analytics
@@ -30,9 +31,25 @@ The built-in scheduler currently imports:
 - Telnet BBS Guide — advertised Telnet and SSH endpoints
 - Synchronet official BBS list — advertised Telnet and SSH endpoints from `synchro.net/sbbslist.html`
 
-Each source keeps its own `source_entry` provenance. When two directories advertise the same protocol/hostname/port, BBSIntel reuses the existing BBS identity instead of moving the endpoint or creating an orphaned duplicate. Multiple terminal protocols from one source row may share one source key and attach to the same BBS.
+Each source keeps its own `source_entry` provenance. When two directories advertise the same protocol/hostname/port, BBSIntel reuses the existing BBS identity instead of moving the endpoint or creating an orphaned duplicate. Hostname matching is case-insensitive. Multiple terminal protocols from one source row may share one source key and attach to the same BBS.
 
 Directory imports are independent: one source failing does not prevent the other configured sources from being attempted.
+
+## Source provenance
+
+Canonical BBS metadata is kept separately from source-specific claims. Each `source_entry` stores:
+
+- source and source key
+- source URL
+- reported name
+- reported software
+- reported country
+- reported description
+- last-seen timestamp
+
+Canonical values on the BBS record are filled conservatively and are not overwritten simply because another source imports later. All source claims remain queryable through `GET /api/v1/bbs/{id}/sources`.
+
+This makes disagreements explicit. For example, one directory may report Mystic while another reports Synchronet, and live probing may independently observe Synchronet. BBSIntel preserves all three pieces of evidence.
 
 ## Status model
 
@@ -83,7 +100,7 @@ Directory metadata remains separate from live observations:
 - `software_evidence` — banner token that produced the match
 - `software_mismatch` — true when reported and observed software disagree
 
-Observed values never overwrite source-reported values. When multiple directory sources resolve to the same BBS, an existing non-empty canonical value is preserved rather than being overwritten by whichever source happens to run last.
+Observed values never overwrite source-reported values. Per-source software claims are available through the source provenance API.
 
 ## Uptime analytics
 
@@ -127,6 +144,7 @@ The scheduler imports all configured directory adapters, including Synchronet. I
 - `GET /healthz`
 - `GET /api/v1/bbs` — BBS list including latest endpoint status and software provenance
 - `GET /api/v1/bbs/{id}` — BBS details and latest status/fingerprint for each endpoint
+- `GET /api/v1/bbs/{id}/sources` — source-specific names, software, country, description, URLs, and last-seen timestamps
 - `GET /api/v1/bbs/{id}/analytics` — first/last observations, status changes, and 24h/7d/30d sample-based uptime
 - `GET /api/v1/bbs/{id}/history?limit=200` — newest probe history across the BBS endpoints; limit is capped at 1000
 - `GET /api/v1/stats` — inventory, probe count, latest-status totals, and software mismatch count
