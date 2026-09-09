@@ -7,6 +7,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/Ploos-AS/BBSIntel/internal/publicstats"
 	"github.com/Ploos-AS/BBSIntel/internal/rollup"
 	"github.com/Ploos-AS/BBSIntel/internal/store"
 )
@@ -23,21 +24,25 @@ func runMaintenance(s *store.Store) {
 	now := time.Now().UTC()
 	switch os.Args[2] {
 	case "rollup":
-		if err := rollup.Refresh(ctx, s.DB, now); err != nil {
-			log.Fatal(err)
-		}
-		log.Printf("maintenance rollup complete")
+		refreshStatistics(ctx, s, now)
 	case "prune":
 		pruneRaw(ctx, s, now)
 	case "all":
-		if err := rollup.Refresh(ctx, s.DB, now); err != nil {
-			log.Fatal(err)
-		}
-		log.Printf("maintenance rollup complete")
+		refreshStatistics(ctx, s, now)
 		pruneRaw(ctx, s, now)
 	default:
 		log.Fatalf("unknown maintenance command %q", os.Args[2])
 	}
+}
+
+func refreshStatistics(ctx context.Context, s *store.Store, now time.Time) {
+	if err := rollup.Refresh(ctx, s.DB, now); err != nil {
+		log.Fatal(err)
+	}
+	if err := publicstats.Refresh(ctx, s.DB, now); err != nil {
+		log.Fatal(err)
+	}
+	log.Printf("maintenance statistics refresh complete")
 }
 
 func pruneRaw(ctx context.Context, s *store.Store, now time.Time) {
