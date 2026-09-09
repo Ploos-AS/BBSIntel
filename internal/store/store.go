@@ -85,7 +85,21 @@ CREATE TABLE IF NOT EXISTS probe_result (
  software_evidence TEXT NOT NULL DEFAULT '',
  error TEXT NOT NULL DEFAULT ''
 );
+CREATE TABLE IF NOT EXISTS change_event (
+ id INTEGER PRIMARY KEY,
+ bbs_id INTEGER REFERENCES bbs(id) ON DELETE CASCADE,
+ endpoint_id INTEGER REFERENCES endpoint(id) ON DELETE CASCADE,
+ occurred_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+ kind TEXT NOT NULL,
+ source TEXT NOT NULL DEFAULT '',
+ field TEXT NOT NULL DEFAULT '',
+ old_value TEXT NOT NULL DEFAULT '',
+ new_value TEXT NOT NULL DEFAULT '',
+ detail TEXT NOT NULL DEFAULT ''
+);
 CREATE INDEX IF NOT EXISTS idx_probe_endpoint_checked ON probe_result(endpoint_id, checked_at DESC);
+CREATE INDEX IF NOT EXISTS idx_change_event_occurred ON change_event(occurred_at DESC,id DESC);
+CREATE INDEX IF NOT EXISTS idx_change_event_bbs ON change_event(bbs_id,occurred_at DESC,id DESC);
 `
 	if _, err := s.DB.ExecContext(ctx, schema); err != nil {
 		return fmt.Errorf("migrate: %w", err)
