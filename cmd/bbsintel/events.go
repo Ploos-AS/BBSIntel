@@ -2,9 +2,13 @@ package main
 
 import (
 	"database/sql"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
+
+	"github.com/Ploos-AS/BBSIntel/internal/cursor"
 )
 
 type eventView struct {
@@ -38,6 +42,20 @@ func eventLimit(r *http.Request) int {
 	return limit
 }
 
+func normalizeSince(raw string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", nil
+	}
+	if t, err := time.Parse(time.RFC3339, raw); err == nil {
+		return t.UTC().Format("2006-01-02 15:04:05"), nil
+	}
+	if t, err := time.ParseInLocation("2006-01-02 15:04:05", raw, time.UTC); err == nil {
+		return t.Format("2006-01-02 15:04:05"), nil
+	}
+	return "", fmt.Errorf("invalid since timestamp")
+}
+
 func (s *server) listEvents(w http.ResponseWriter, r *http.Request) {
 	s.writeEvents(w, r, "", eventLimit(r))
 }
@@ -56,14 +74,44 @@ func (s *server) listBBSEvents(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) writeEvents(w http.ResponseWriter, r *http.Request, bbsID string, limit int) {
-	query := `SELECT id,COALESCE(bbs_id,0),COALESCE(endpoint_id,0),occurred_at,kind,source,field,old_value,new_value,detail FROM change_event`
+	conditions := []string{}
 	args := []any{}
 	if bbsID != "" {
-		query += ` WHERE bbs_id=?`
+		conditions = append(conditions, "bbs_id=?")
 		args = append(args, bbsID)
 	}
+
+	since, err := normalizeSince(r.URL.Query().Get("since"))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if since != "" {
+		conditions = append(conditions, "occurred_at>?")
+		args = append(args, since)
+	}
+
+	if token := strings.TrimSpace(r.URL.Query().Get("cursor")); token != "" {
+		parts, err := cursor.Decode(token, 2)
+		if err != nil {
+			http.Error(w, "invalid cursor", http.StatusBadRequest)
+			return
+		}
+		id, err := strconv.ParseInt(parts[1], 10, 64)
+		if err != nil || id <= 0 {
+			http.Error(w, "invalid cursor", http.StatusBadRequest)
+			return
+		}
+		conditions = append(conditions, "(occurred_at<? OR (occurred_at=? AND id<?))")
+		args = append(args, parts[0], parts[0], id)
+	}
+
+	query := `SELECT id,COALESCE(bbs_id,0),COALESCE(endpoint_id,0),occurred_at,kind,source,field,old_value,new_value,detail FROM change_event`
+	if len(conditions) > 0 {
+		query += " WHERE " + strings.Join(conditions, " AND ")
+	}
 	query += ` ORDER BY occurred_at DESC,id DESC LIMIT ?`
-	args = append(args, limit)
+	args = append(args, limit+1)
 	rows, err := s.db.QueryContext(r.Context(), query, args...)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -79,6 +127,15 @@ func (s *server) writeEvents(w http.ResponseWriter, r *http.Request, bbsID strin
 			return
 		}
 		out = append(out, v)
+	}
+	if err := rows.Err(); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if len(out) > limit {
+		out = out[:limit]
+		last := out[len(out)-1]
+		w.Header().Set("X-Next-Cursor", cursor.Encode(last.OccurredAt, strconv.FormatInt(last.ID, 10)))
 	}
 	jsonOut(w, out)
 }
