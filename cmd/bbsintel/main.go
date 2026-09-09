@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -14,6 +15,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Ploos-AS/BBSIntel/internal/buildinfo"
 	"github.com/Ploos-AS/BBSIntel/internal/ingest"
 	"github.com/Ploos-AS/BBSIntel/internal/probe"
 	"github.com/Ploos-AS/BBSIntel/internal/scheduler"
@@ -26,6 +28,12 @@ type server struct {
 }
 
 func main() {
+	if len(os.Args) >= 2 && (os.Args[1] == "version" || os.Args[1] == "--version" || os.Args[1] == "-version") {
+		i := buildinfo.Current()
+		fmt.Printf("BBSIntel %s commit=%s date=%s\n", i.Version, i.Commit, i.Date)
+		return
+	}
+
 	listen := env("BBSINTEL_LISTEN", ":8080")
 	dbPath := env("BBSINTEL_DB", "./data/bbsintel.db")
 	s, err := store.Open(dbPath)
@@ -94,6 +102,9 @@ func main() {
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		jsonOut(w, map[string]string{"status": "ok"})
 	})
+	mux.HandleFunc("GET /api/v1/version", func(w http.ResponseWriter, r *http.Request) {
+		jsonOut(w, buildinfo.Current())
+	})
 	mux.HandleFunc("GET /api/v1/bbs", srv.listBBS)
 	mux.HandleFunc("GET /api/v1/bbs/{id}", srv.getBBS)
 	mux.HandleFunc("GET /api/v1/stats", srv.stats)
@@ -111,7 +122,7 @@ func main() {
 		_ = httpServer.Shutdown(shutdownCtx)
 	}()
 
-	log.Printf("BBSIntel listening on %s", listen)
+	log.Printf("BBSIntel %s listening on %s", buildinfo.Version, listen)
 	if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Fatal(err)
 	}
