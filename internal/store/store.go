@@ -171,7 +171,6 @@ CREATE INDEX IF NOT EXISTS idx_bbs_name_ci ON bbs(lower(name),id);
 CREATE INDEX IF NOT EXISTS idx_bbs_software_ci ON bbs(lower(trim(software)),id);
 CREATE INDEX IF NOT EXISTS idx_bbs_country_ci ON bbs(lower(trim(country)),id);
 CREATE INDEX IF NOT EXISTS idx_endpoint_bbs_protocol_ci ON endpoint(bbs_id,lower(trim(protocol)));
-CREATE INDEX IF NOT EXISTS idx_source_entry_bbs_source_active_ci ON source_entry(bbs_id,lower(trim(source)),active);
 `
 	if _, err := s.DB.ExecContext(ctx, schema); err != nil {
 		return fmt.Errorf("migrate: %w", err)
@@ -195,8 +194,13 @@ CREATE INDEX IF NOT EXISTS idx_source_entry_bbs_source_active_ci ON source_entry
 			return fmt.Errorf("migrate: %w", err)
 		}
 	}
-	if _, err := s.DB.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_source_entry_presence ON source_entry(source,active,last_seen)`); err != nil {
-		return fmt.Errorf("migrate source presence index: %w", err)
+	for _, stmt := range []string{
+		`CREATE INDEX IF NOT EXISTS idx_source_entry_presence ON source_entry(source,active,last_seen)`,
+		`CREATE INDEX IF NOT EXISTS idx_source_entry_bbs_source_active_ci ON source_entry(bbs_id,lower(trim(source)),active)`,
+	} {
+		if _, err := s.DB.ExecContext(ctx, stmt); err != nil {
+			return fmt.Errorf("migrate source index: %w", err)
+		}
 	}
 	return nil
 }
