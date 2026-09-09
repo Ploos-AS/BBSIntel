@@ -46,11 +46,43 @@ The scheduler refreshes rollups after probe passes.
 
 This endpoint establishes the rule that public historical dashboards should read aggregate tables instead of rescanning raw probe history.
 
-## Retention
+## Retention and maintenance
 
-`rollup.PruneRaw` is implemented but is deliberately not scheduled automatically in M1.12. It removes `probe_result` rows older than a supplied retention duration and is safe to run after rollups have been refreshed.
+Raw retention is explicit and operator-controlled. It is not silently scheduled by the worker.
 
-A production retention value must be an explicit operator policy. The intended initial policy is approximately 90 days raw, with hourly/daily aggregates retained much longer, but no automatic deletion is enabled by this milestone.
+Available commands:
+
+```sh
+bbsintel maintenance rollup
+bbsintel maintenance prune
+bbsintel maintenance all
+```
+
+- `rollup` refreshes hourly/daily aggregates without deleting raw data.
+- `prune` deletes raw `probe_result` rows older than `BBSINTEL_RAW_RETENTION`.
+- `all` refreshes rollups first and only then prunes raw data.
+- `BBSINTEL_RAW_RETENTION` defaults to `2160h` (90 days) when prune/all is explicitly invoked.
+
+This ordering ensures that long-term daily history survives raw-data pruning.
+
+## Liveness and readiness
+
+- `GET /healthz` remains a cheap process-liveness check.
+- `GET /readyz` verifies that the SQLite database is reachable and can execute a query. Database failure returns HTTP 503.
+
+This keeps orchestration semantics clear: a live process is not necessarily ready to serve database-backed public requests.
+
+## HTTP hardening
+
+The public HTTP server now has explicit resource/time bounds. Defaults are configurable through environment variables:
+
+- `BBSINTEL_HTTP_READ_HEADER_TIMEOUT=5s`
+- `BBSINTEL_HTTP_READ_TIMEOUT=15s`
+- `BBSINTEL_HTTP_WRITE_TIMEOUT=30s`
+- `BBSINTEL_HTTP_IDLE_TIMEOUT=60s`
+- `BBSINTEL_HTTP_MAX_HEADER_BYTES=1048576`
+
+These are application-level safety limits. A public deployment should still use a reverse proxy or ingress for TLS, connection/rate limiting, request logging, and edge caching.
 
 ## SQLite concurrency
 
@@ -60,11 +92,9 @@ Increasing the per-process connection pool is intentionally deferred until all P
 
 ## Remaining public-service hardening
 
-Before calling the service fully production-hardened, subsequent milestones should add:
+Before calling the service fully production-hardened, subsequent work should add:
 
-- explicit raw-retention command/configuration and maintenance scheduling;
-- readiness separate from liveness;
-- HTTP read/write/idle timeouts and maximum-header sizing;
+- maintenance scheduling/operations guidance for retention;
 - rate limiting / reverse-proxy deployment guidance;
 - Prometheus/OpenMetrics metrics;
 - additional materialized public statistics (inventory, software, protocol, source, country, new/disappeared systems);
