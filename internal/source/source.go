@@ -3,16 +3,16 @@ package source
 import "context"
 
 type Entry struct {
-	Source string
-	SourceKey string
-	SourceURL string
-	Name string
-	Software string
-	Country string
+	Source      string
+	SourceKey   string
+	SourceURL   string
+	Name        string
+	Software    string
+	Country     string
 	Description string
-	Protocol string
-	Hostname string
-	Port int
+	Protocol    string
+	Hostname    string
+	Port        int
 }
 
 type Adapter interface {
