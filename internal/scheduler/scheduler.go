@@ -10,6 +10,7 @@ import (
 
 	"github.com/Ploos-AS/BBSIntel/internal/ingest"
 	"github.com/Ploos-AS/BBSIntel/internal/probe"
+	"github.com/Ploos-AS/BBSIntel/internal/publicstats"
 	"github.com/Ploos-AS/BBSIntel/internal/rollup"
 	"github.com/Ploos-AS/BBSIntel/internal/source"
 	"github.com/Ploos-AS/BBSIntel/internal/sourcehealth"
@@ -41,6 +42,9 @@ func (s Scheduler) Run(ctx context.Context) error {
 	if err := s.importOnce(ctx); err != nil {
 		log.Printf("initial import failed: %v", err)
 	}
+	if err := s.refreshPublicStats(ctx); err != nil {
+		log.Printf("initial public statistics refresh failed: %v", err)
+	}
 	if err := s.evaluateSourceHealth(ctx); err != nil {
 		log.Printf("initial source health evaluation failed: %v", err)
 	}
@@ -63,6 +67,9 @@ func (s Scheduler) Run(ctx context.Context) error {
 		case <-importTicker.C:
 			if err := s.importOnce(ctx); err != nil {
 				log.Printf("scheduled import failed: %v", err)
+			}
+			if err := s.refreshPublicStats(ctx); err != nil {
+				log.Printf("scheduled public statistics refresh failed: %v", err)
 			}
 			if err := s.evaluateSourceHealth(ctx); err != nil {
 				log.Printf("scheduled source health evaluation failed: %v", err)
@@ -112,6 +119,14 @@ func (s Scheduler) refreshRollups(ctx context.Context) error {
 		return err
 	}
 	log.Printf("statistics rollups refreshed")
+	return nil
+}
+
+func (s Scheduler) refreshPublicStats(ctx context.Context) error {
+	if err := publicstats.Refresh(ctx, s.DB, time.Now().UTC()); err != nil {
+		return err
+	}
+	log.Printf("public statistics snapshots refreshed")
 	return nil
 }
 
