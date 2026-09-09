@@ -3,6 +3,8 @@ package scheduler
 import (
 	"context"
 	"database/sql"
+	"errors"
+	"fmt"
 	"log"
 	"time"
 
@@ -63,12 +65,20 @@ func (s Scheduler) Run(ctx context.Context) error {
 }
 
 func (s Scheduler) importOnce(ctx context.Context) error {
-	n, err := ingest.Import(ctx, s.DB, &source.TelnetBBSGuide{})
-	if err != nil {
-		return err
+	adapters := []source.Adapter{
+		&source.TelnetBBSGuide{},
+		&source.Synchronet{},
 	}
-	log.Printf("scheduled import completed: %d entries", n)
-	return nil
+	var errs []error
+	for _, adapter := range adapters {
+		n, err := ingest.Import(ctx, s.DB, adapter)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", adapter.Name(), err))
+			continue
+		}
+		log.Printf("scheduled import completed: source=%s entries=%d", adapter.Name(), n)
+	}
+	return errors.Join(errs...)
 }
 
 func (s Scheduler) probeOnce(ctx context.Context, concurrency int, baseInterval time.Duration) error {
