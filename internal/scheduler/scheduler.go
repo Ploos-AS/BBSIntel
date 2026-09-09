@@ -37,7 +37,7 @@ func (s Scheduler) Run(ctx context.Context) error {
 	if err := s.importOnce(ctx); err != nil {
 		log.Printf("initial import failed: %v", err)
 	}
-	if err := s.probeOnce(ctx, cfg.Concurrency); err != nil {
+	if err := s.probeOnce(ctx, cfg.Concurrency, cfg.ProbeInterval); err != nil {
 		log.Printf("initial probe failed: %v", err)
 	}
 
@@ -55,7 +55,7 @@ func (s Scheduler) Run(ctx context.Context) error {
 				log.Printf("scheduled import failed: %v", err)
 			}
 		case <-probeTicker.C:
-			if err := s.probeOnce(ctx, cfg.Concurrency); err != nil {
+			if err := s.probeOnce(ctx, cfg.Concurrency, cfg.ProbeInterval); err != nil {
 				log.Printf("scheduled probe failed: %v", err)
 			}
 		}
@@ -71,11 +71,11 @@ func (s Scheduler) importOnce(ctx context.Context) error {
 	return nil
 }
 
-func (s Scheduler) probeOnce(ctx context.Context, concurrency int) error {
-	n, err := (probe.Worker{DB: s.DB, Concurrency: concurrency}).Run(ctx)
+func (s Scheduler) probeOnce(ctx context.Context, concurrency int, baseInterval time.Duration) error {
+	n, err := (probe.Worker{DB: s.DB, Concurrency: concurrency, BaseInterval: baseInterval}).Run(ctx)
 	if err != nil {
 		return err
 	}
-	log.Printf("scheduled probe completed: %d endpoints", n)
+	log.Printf("scheduled probe completed: %d endpoints probed", n)
 	return nil
 }
