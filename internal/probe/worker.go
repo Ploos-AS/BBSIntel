@@ -22,6 +22,7 @@ type Worker struct {
 	DB           *sql.DB
 	Concurrency  int
 	TelnetProbe  ProbeFunc
+	SSHProbe     ProbeFunc
 	Now          func() time.Time
 	BaseInterval time.Duration
 }
@@ -37,6 +38,10 @@ func (w Worker) Run(ctx context.Context) (int, error) {
 	telnetProbe := w.TelnetProbe
 	if telnetProbe == nil {
 		telnetProbe = Telnet
+	}
+	sshProbe := w.SSHProbe
+	if sshProbe == nil {
+		sshProbe = SSH
 	}
 	now := time.Now
 	if w.Now != nil {
@@ -81,7 +86,13 @@ func (w Worker) Run(ctx context.Context) (int, error) {
 				if ctx.Err() != nil {
 					return
 				}
-				if e.Protocol != "telnet" {
+				var fn ProbeFunc
+				switch e.Protocol {
+				case "telnet":
+					fn = telnetProbe
+				case "ssh":
+					fn = sshProbe
+				default:
 					continue
 				}
 				due, err := w.endpointDue(ctx, e.ID, now(), baseInterval)
@@ -92,7 +103,7 @@ func (w Worker) Run(ctx context.Context) (int, error) {
 				if !due {
 					continue
 				}
-				result := telnetProbe(ctx, e.Hostname, e.Port)
+				result := fn(ctx, e.Hostname, e.Port)
 				_, err = w.DB.ExecContext(ctx, `
 INSERT INTO probe_result(
  endpoint_id,status,connect_ms,banner_bytes,banner_sha256,banner_preview,detected_software,software_confidence,software_evidence,error
