@@ -33,14 +33,34 @@ go run ./cmd/bbsintel
 
 Defaults: listen on `:8080`, database at `./data/bbsintel.db`.
 
-Environment variables: `BBSINTEL_LISTEN`, `BBSINTEL_DB`.
+Environment variables:
+
+- `BBSINTEL_LISTEN`
+- `BBSINTEL_DB`
+- `BBSINTEL_PROBE_CONCURRENCY` (default `8`)
+
+## Import BBS directory data
+
+```sh
+go run ./cmd/bbsintel import telnetbbsguide
+```
+
+The import is idempotent for known source entries and endpoints.
+
+## Probe imported endpoints
+
+```sh
+go run ./cmd/bbsintel probe
+```
+
+The worker probes Telnet endpoints concurrently and appends each result to `probe_result`. Re-running it builds availability history instead of overwriting prior checks.
 
 ## API
 
 - `GET /healthz`
-- `GET /api/v1/bbs`
-- `GET /api/v1/bbs/{id}`
-- `GET /api/v1/stats`
+- `GET /api/v1/bbs` — BBS list including latest endpoint status
+- `GET /api/v1/bbs/{id}` — BBS details and latest status for each endpoint
+- `GET /api/v1/stats` — inventory, probe count, and latest-status totals
 
 ## Container
 
@@ -52,7 +72,7 @@ Persistent data lives under `/data` in the container.
 
 ## Roadmap
 
-Planned adapters include Telnet BBS Guide and other public BBS directories. Later milestones add scheduled imports, richer Telnet negotiation, software fingerprinting, SSH/RLogin probes, uptime analytics, feeds, and a web UI.
+Planned next steps include scheduled imports and probing, richer Telnet negotiation, software fingerprinting, SSH/RLogin probes, uptime analytics, feeds, and a web UI.
 
 ## License
 
