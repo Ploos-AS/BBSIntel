@@ -137,12 +137,31 @@ CREATE TABLE IF NOT EXISTS endpoint_daily (
  connect_ms_count INTEGER NOT NULL,
  PRIMARY KEY(endpoint_id,bucket_start)
 );
+CREATE TABLE IF NOT EXISTS public_dimension_snapshot (
+ dimension TEXT NOT NULL,
+ value TEXT NOT NULL,
+ count INTEGER NOT NULL,
+ refreshed_at TEXT NOT NULL,
+ PRIMARY KEY(dimension,value)
+);
+CREATE TABLE IF NOT EXISTS public_bbs_presence (
+ bbs_id INTEGER PRIMARY KEY REFERENCES bbs(id) ON DELETE CASCADE,
+ active INTEGER NOT NULL,
+ last_changed TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS public_lifecycle_daily (
+ day TEXT PRIMARY KEY,
+ new_bbs INTEGER NOT NULL DEFAULT 0,
+ disappeared_bbs INTEGER NOT NULL DEFAULT 0,
+ returned_bbs INTEGER NOT NULL DEFAULT 0
+);
 CREATE INDEX IF NOT EXISTS idx_probe_endpoint_checked ON probe_result(endpoint_id, checked_at DESC);
 CREATE INDEX IF NOT EXISTS idx_probe_checked ON probe_result(checked_at);
 CREATE INDEX IF NOT EXISTS idx_change_event_occurred ON change_event(occurred_at DESC,id DESC);
 CREATE INDEX IF NOT EXISTS idx_change_event_bbs ON change_event(bbs_id,occurred_at DESC,id DESC);
 CREATE INDEX IF NOT EXISTS idx_endpoint_hourly_bucket ON endpoint_hourly(bucket_start,endpoint_id);
 CREATE INDEX IF NOT EXISTS idx_endpoint_daily_bucket ON endpoint_daily(bucket_start,endpoint_id);
+CREATE INDEX IF NOT EXISTS idx_public_dimension ON public_dimension_snapshot(dimension,count DESC,value);
 `
 	if _, err := s.DB.ExecContext(ctx, schema); err != nil {
 		return fmt.Errorf("migrate: %w", err)
