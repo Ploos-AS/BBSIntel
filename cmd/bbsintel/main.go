@@ -4,14 +4,19 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"strconv"
 	"strings"
+	"syscall"
+	"time"
 
 	"github.com/Ploos-AS/BBSIntel/internal/ingest"
 	"github.com/Ploos-AS/BBSIntel/internal/probe"
+	"github.com/Ploos-AS/BBSIntel/internal/scheduler"
 	"github.com/Ploos-AS/BBSIntel/internal/source"
 	"github.com/Ploos-AS/BBSIntel/internal/store"
 )
@@ -48,6 +53,21 @@ func main() {
 		return
 	}
 
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	if len(os.Args) >= 2 && os.Args[1] == "scheduler" {
+		err := (scheduler.Scheduler{DB: s.DB, Config: scheduler.Config{
+			ImportInterval: envDuration("BBSINTEL_IMPORT_INTERVAL", 24*time.Hour),
+			ProbeInterval:  envDuration("BBSINTEL_PROBE_INTERVAL", 30*time.Minute),
+			Concurrency:    envInt("BBSINTEL_PROBE_CONCURRENCY", 8),
+		}}).Run(ctx)
+		if err != nil && !errors.Is(err, context.Canceled) {
+			log.Fatal(err)
+		}
+		return
+	}
+
 	srv := &server{db: s.DB}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
@@ -56,8 +76,19 @@ func main() {
 	mux.HandleFunc("GET /api/v1/bbs", srv.listBBS)
 	mux.HandleFunc("GET /api/v1/bbs/{id}", srv.getBBS)
 	mux.HandleFunc("GET /api/v1/stats", srv.stats)
+
+	httpServer := &http.Server{Addr: listen, Handler: mux, ReadHeaderTimeout: 5 * time.Second}
+	go func() {
+		<-ctx.Done()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		_ = httpServer.Shutdown(shutdownCtx)
+	}()
+
 	log.Printf("BBSIntel listening on %s", listen)
-	log.Fatal(http.ListenAndServe(listen, mux))
+	if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		log.Fatal(err)
+	}
 }
 
 func env(k, fallback string) string {
@@ -77,6 +108,18 @@ func envInt(k string, fallback int) int {
 		return fallback
 	}
 	return n
+}
+
+func envDuration(k string, fallback time.Duration) time.Duration {
+	v := os.Getenv(k)
+	if v == "" {
+		return fallback
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil || d <= 0 {
+		return fallback
+	}
+	return d
 }
 
 func jsonOut(w http.ResponseWriter, v any) {
