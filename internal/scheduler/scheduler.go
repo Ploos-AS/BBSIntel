@@ -115,15 +115,23 @@ func (s Scheduler) probeOnce(ctx context.Context, concurrency int, baseInterval 
 }
 
 func (s Scheduler) refreshRollups(ctx context.Context) error {
-	if err := rollup.Refresh(ctx, s.DB, time.Now().UTC()); err != nil {
+	now := time.Now().UTC()
+	if err := rollup.Refresh(ctx, s.DB, now); err != nil {
 		return err
 	}
-	log.Printf("statistics rollups refreshed")
+	if err := publicstats.RefreshRuntime(ctx, s.DB, now); err != nil {
+		return err
+	}
+	log.Printf("statistics rollups and runtime snapshot refreshed")
 	return nil
 }
 
 func (s Scheduler) refreshPublicStats(ctx context.Context) error {
-	if err := publicstats.Refresh(ctx, s.DB, time.Now().UTC()); err != nil {
+	now := time.Now().UTC()
+	if err := publicstats.Refresh(ctx, s.DB, now); err != nil {
+		return err
+	}
+	if err := publicstats.RefreshRuntime(ctx, s.DB, now); err != nil {
 		return err
 	}
 	log.Printf("public statistics snapshots refreshed")
