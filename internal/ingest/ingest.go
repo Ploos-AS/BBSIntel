@@ -5,56 +5,100 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/Ploos-AS/BBSIntel/internal/source"
 )
 
 func Import(ctx context.Context, db *sql.DB, adapter source.Adapter) (int, error) {
-	entries, err := adapter.Fetch(ctx)
-	if err != nil {
-		return 0, err
-	}
-	if len(entries) == 0 {
-		return 0, fmt.Errorf("source %s returned an empty snapshot; refusing presence reconciliation", adapter.Name())
-	}
-
+	started := time.Now()
 	sourceName := strings.TrimSpace(adapter.Name())
 	if sourceName == "" {
 		return 0, fmt.Errorf("source adapter has empty name")
 	}
+
+	entries, err := adapter.Fetch(ctx)
+	if err != nil {
+		recordSourceFailure(ctx, db, sourceName, started, err)
+		return 0, err
+	}
+	if len(entries) == 0 {
+		err := fmt.Errorf("source %s returned an empty snapshot; refusing presence reconciliation", sourceName)
+		recordSourceFailure(ctx, db, sourceName, started, err)
+		return 0, err
+	}
+
 	seen := make(map[string]struct{})
 	for i := range entries {
 		if strings.TrimSpace(entries[i].Source) == "" {
 			entries[i].Source = sourceName
 		}
 		if entries[i].Source != sourceName {
-			return 0, fmt.Errorf("source adapter %s returned entry for source %s", sourceName, entries[i].Source)
+			err := fmt.Errorf("source adapter %s returned entry for source %s", sourceName, entries[i].Source)
+			recordSourceFailure(ctx, db, sourceName, started, err)
+			return 0, err
 		}
 		if strings.TrimSpace(entries[i].SourceKey) == "" {
-			return 0, fmt.Errorf("source %s returned entry with empty source key", sourceName)
+			err := fmt.Errorf("source %s returned entry with empty source key", sourceName)
+			recordSourceFailure(ctx, db, sourceName, started, err)
+			return 0, err
 		}
 		seen[entries[i].SourceKey] = struct{}{}
 	}
 
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
+		recordSourceFailure(ctx, db, sourceName, started, err)
 		return 0, err
 	}
-	defer tx.Rollback()
 	count := 0
 	for _, e := range entries {
 		if err := upsert(ctx, tx, e); err != nil {
+			_ = tx.Rollback()
+			recordSourceFailure(ctx, db, sourceName, started, err)
 			return count, err
 		}
 		count++
 	}
 	if err := reconcilePresence(ctx, tx, sourceName, seen); err != nil {
+		_ = tx.Rollback()
+		recordSourceFailure(ctx, db, sourceName, started, err)
+		return count, err
+	}
+	if err := recordSourceSuccess(ctx, tx, sourceName, started, count); err != nil {
+		_ = tx.Rollback()
+		recordSourceFailure(ctx, db, sourceName, started, err)
 		return count, err
 	}
 	if err := tx.Commit(); err != nil {
+		recordSourceFailure(ctx, db, sourceName, started, err)
 		return count, err
 	}
 	return count, nil
+}
+
+func recordSourceSuccess(ctx context.Context, tx *sql.Tx, sourceName string, started time.Time, count int) error {
+	durationMS := time.Since(started).Milliseconds()
+	_, err := tx.ExecContext(ctx, `INSERT INTO source_health(
+ source,last_attempt_at,last_success_at,last_duration_ms,last_entry_count,consecutive_failures,last_error
+) VALUES(?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,?,?,0,'')
+ON CONFLICT(source) DO UPDATE SET
+ last_attempt_at=CURRENT_TIMESTAMP,last_success_at=CURRENT_TIMESTAMP,last_duration_ms=excluded.last_duration_ms,
+ last_entry_count=excluded.last_entry_count,consecutive_failures=0,last_error=''`, sourceName, durationMS, count)
+	return err
+}
+
+func recordSourceFailure(ctx context.Context, db *sql.DB, sourceName string, started time.Time, importErr error) {
+	if db == nil || sourceName == "" || importErr == nil {
+		return
+	}
+	durationMS := time.Since(started).Milliseconds()
+	_, _ = db.ExecContext(ctx, `INSERT INTO source_health(
+ source,last_attempt_at,last_failure_at,last_duration_ms,last_entry_count,consecutive_failures,last_error
+) VALUES(?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,?,0,1,?)
+ON CONFLICT(source) DO UPDATE SET
+ last_attempt_at=CURRENT_TIMESTAMP,last_failure_at=CURRENT_TIMESTAMP,last_duration_ms=excluded.last_duration_ms,
+ consecutive_failures=source_health.consecutive_failures+1,last_error=excluded.last_error`, sourceName, durationMS, importErr.Error())
 }
 
 func upsert(ctx context.Context, tx *sql.Tx, e source.Entry) error {
