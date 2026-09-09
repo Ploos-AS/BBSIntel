@@ -56,14 +56,14 @@ func (s *server) bbsHistory(w http.ResponseWriter, r *http.Request) {
 }
 
 type dailyStatistic struct {
-	Date           string  `json:"date"`
-	Checks         int64   `json:"checks"`
-	OnlineChecks   int64   `json:"online_checks"`
-	ConnectedChecks int64  `json:"connected_checks"`
-	OfflineChecks  int64   `json:"offline_checks"`
-	DNSFailChecks  int64   `json:"dns_fail_checks"`
-	OnlinePct      float64 `json:"online_pct"`
-	ConnectedPct   float64 `json:"connected_pct"`
+	Date             string  `json:"date"`
+	Checks           int64   `json:"checks"`
+	OnlineChecks     int64   `json:"online_checks"`
+	ConnectedChecks  int64   `json:"connected_checks"`
+	OfflineChecks    int64   `json:"offline_checks"`
+	DNSFailChecks    int64   `json:"dns_fail_checks"`
+	OnlinePct        float64 `json:"online_pct"`
+	ConnectedPct     float64 `json:"connected_pct"`
 	AverageConnectMS float64 `json:"average_connect_ms"`
 }
 
