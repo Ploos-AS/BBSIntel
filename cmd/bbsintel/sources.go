@@ -4,6 +4,9 @@ import (
 	"database/sql"
 	"net/http"
 	"strings"
+	"time"
+
+	"github.com/Ploos-AS/BBSIntel/internal/sourcehealth"
 )
 
 type sourceView struct {
@@ -28,6 +31,8 @@ type sourceHealthView struct {
 	LastEntryCount      int    `json:"last_entry_count"`
 	ConsecutiveFailures int    `json:"consecutive_failures"`
 	LastError           string `json:"last_error,omitempty"`
+	Freshness           string `json:"freshness"`
+	SuccessAgeSeconds   int64  `json:"success_age_seconds"`
 	Healthy             bool   `json:"healthy"`
 }
 
@@ -81,6 +86,7 @@ FROM source_health ORDER BY source`)
 	}
 	defer rows.Close()
 
+	now := time.Now().UTC()
 	out := []sourceHealthView{}
 	for rows.Next() {
 		var v sourceHealthView
@@ -88,7 +94,19 @@ FROM source_health ORDER BY source`)
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		v.Healthy = v.LastSuccessAt != "" && v.ConsecutiveFailures == 0
+
+		var lastSuccess time.Time
+		if v.LastSuccessAt != "" {
+			lastSuccess, err = time.Parse("2006-01-02 15:04:05", v.LastSuccessAt)
+			if err != nil {
+				http.Error(w, "invalid source health timestamp", http.StatusInternalServerError)
+				return
+			}
+		}
+		classification := sourcehealth.Classify(now, lastSuccess, v.ConsecutiveFailures)
+		v.Freshness = classification.State
+		v.SuccessAgeSeconds = classification.AgeSeconds
+		v.Healthy = v.Freshness == "fresh"
 		out = append(out, v)
 	}
 	jsonOut(w, out)
