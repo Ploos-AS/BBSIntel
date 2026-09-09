@@ -42,6 +42,9 @@ func refreshStatistics(ctx context.Context, s *store.Store, now time.Time) {
 	if err := publicstats.Refresh(ctx, s.DB, now); err != nil {
 		log.Fatal(err)
 	}
+	if err := publicstats.RefreshRuntime(ctx, s.DB, now); err != nil {
+		log.Fatal(err)
+	}
 	log.Printf("maintenance statistics refresh complete")
 }
 
