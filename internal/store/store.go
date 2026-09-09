@@ -81,7 +81,9 @@ CREATE TABLE IF NOT EXISTS source_health (
  last_duration_ms INTEGER NOT NULL DEFAULT 0,
  last_entry_count INTEGER NOT NULL DEFAULT 0,
  consecutive_failures INTEGER NOT NULL DEFAULT 0,
- last_error TEXT NOT NULL DEFAULT ''
+ last_error TEXT NOT NULL DEFAULT '',
+ current_state TEXT NOT NULL DEFAULT 'unknown',
+ state_changed_at TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS probe_result (
  id INTEGER PRIMARY KEY,
@@ -128,6 +130,8 @@ CREATE INDEX IF NOT EXISTS idx_change_event_bbs ON change_event(bbs_id,occurred_
 		`ALTER TABLE source_entry ADD COLUMN reported_description TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE source_entry ADD COLUMN active INTEGER NOT NULL DEFAULT 1`,
 		`ALTER TABLE source_entry ADD COLUMN missing_since TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE source_health ADD COLUMN current_state TEXT NOT NULL DEFAULT 'unknown'`,
+		`ALTER TABLE source_health ADD COLUMN state_changed_at TEXT NOT NULL DEFAULT ''`,
 	} {
 		if _, err := s.DB.ExecContext(ctx, stmt); err != nil && !isDuplicateColumn(err) {
 			return fmt.Errorf("migrate: %w", err)
