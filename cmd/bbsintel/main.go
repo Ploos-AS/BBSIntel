@@ -7,9 +7,11 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/Ploos-AS/BBSIntel/internal/ingest"
+	"github.com/Ploos-AS/BBSIntel/internal/probe"
 	"github.com/Ploos-AS/BBSIntel/internal/source"
 	"github.com/Ploos-AS/BBSIntel/internal/store"
 )
@@ -36,6 +38,16 @@ func main() {
 		return
 	}
 
+	if len(os.Args) >= 2 && os.Args[1] == "probe" {
+		concurrency := envInt("BBSINTEL_PROBE_CONCURRENCY", 8)
+		n, err := (probe.Worker{DB: s.DB, Concurrency: concurrency}).Run(context.Background())
+		if err != nil {
+			log.Fatal(err)
+		}
+		log.Printf("probed %d Telnet endpoints", n)
+		return
+	}
+
 	srv := &server{db: s.DB}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
@@ -55,13 +67,32 @@ func env(k, fallback string) string {
 	return fallback
 }
 
+func envInt(k string, fallback int) int {
+	v := os.Getenv(k)
+	if v == "" {
+		return fallback
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n <= 0 {
+		return fallback
+	}
+	return n
+}
+
 func jsonOut(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(v)
 }
 
 func (s *server) listBBS(w http.ResponseWriter, r *http.Request) {
-	rows, err := s.db.QueryContext(r.Context(), `SELECT id,name,software,country FROM bbs ORDER BY lower(name)`)
+	rows, err := s.db.QueryContext(r.Context(), `
+SELECT b.id,b.name,b.software,b.country,
+       COALESCE(e.protocol,''),COALESCE(e.hostname,''),COALESCE(e.port,0),
+       COALESCE(pr.status,''),COALESCE(pr.checked_at,''),COALESCE(pr.connect_ms,0)
+FROM bbs b
+LEFT JOIN endpoint e ON e.id=(SELECT e2.id FROM endpoint e2 WHERE e2.bbs_id=b.id ORDER BY e2.id LIMIT 1)
+LEFT JOIN probe_result pr ON pr.id=(SELECT p2.id FROM probe_result p2 WHERE p2.endpoint_id=e.id ORDER BY p2.checked_at DESC,p2.id DESC LIMIT 1)
+ORDER BY lower(b.name)`)
 	if err != nil {
 		http.Error(w, err.Error(), 500)
 		return
@@ -70,9 +101,15 @@ func (s *server) listBBS(w http.ResponseWriter, r *http.Request) {
 	out := []map[string]any{}
 	for rows.Next() {
 		var id int64
-		var name, software, country string
-		if rows.Scan(&id, &name, &software, &country) == nil {
-			out = append(out, map[string]any{"id": id, "name": name, "software": software, "country": country})
+		var name, software, country, protocol, hostname, status, checkedAt string
+		var port int
+		var connectMS int64
+		if rows.Scan(&id, &name, &software, &country, &protocol, &hostname, &port, &status, &checkedAt, &connectMS) == nil {
+			out = append(out, map[string]any{
+				"id": id, "name": name, "software": software, "country": country,
+				"protocol": protocol, "hostname": hostname, "port": port,
+				"status": status, "checked_at": checkedAt, "connect_ms": connectMS,
+			})
 		}
 	}
 	jsonOut(w, out)
@@ -90,7 +127,38 @@ func (s *server) getBBS(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), 500)
 		return
 	}
-	jsonOut(w, map[string]any{"id": id, "name": name, "software": software, "country": country, "description": description})
+
+	rows, err := s.db.QueryContext(r.Context(), `
+SELECT e.id,e.protocol,e.hostname,e.port,
+       COALESCE(pr.status,''),COALESCE(pr.checked_at,''),COALESCE(pr.connect_ms,0),COALESCE(pr.banner_bytes,0),COALESCE(pr.error,'')
+FROM endpoint e
+LEFT JOIN probe_result pr ON pr.id=(SELECT p2.id FROM probe_result p2 WHERE p2.endpoint_id=e.id ORDER BY p2.checked_at DESC,p2.id DESC LIMIT 1)
+WHERE e.bbs_id=? ORDER BY e.id`, id)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	defer rows.Close()
+	endpoints := []map[string]any{}
+	for rows.Next() {
+		var endpointID int64
+		var protocol, hostname, status, checkedAt, probeError string
+		var port, bannerBytes int
+		var connectMS int64
+		if err := rows.Scan(&endpointID, &protocol, &hostname, &port, &status, &checkedAt, &connectMS, &bannerBytes, &probeError); err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+		endpoints = append(endpoints, map[string]any{
+			"id": endpointID, "protocol": protocol, "hostname": hostname, "port": port,
+			"status": status, "checked_at": checkedAt, "connect_ms": connectMS,
+			"banner_bytes": bannerBytes, "error": probeError,
+		})
+	}
+	jsonOut(w, map[string]any{
+		"id": id, "name": name, "software": software, "country": country,
+		"description": description, "endpoints": endpoints,
+	})
 }
 
 func (s *server) stats(w http.ResponseWriter, r *http.Request) {
@@ -98,5 +166,22 @@ func (s *server) stats(w http.ResponseWriter, r *http.Request) {
 	_ = s.db.QueryRowContext(r.Context(), `SELECT count(*) FROM bbs`).Scan(&bbs)
 	_ = s.db.QueryRowContext(r.Context(), `SELECT count(*) FROM endpoint`).Scan(&endpoints)
 	_ = s.db.QueryRowContext(r.Context(), `SELECT count(*) FROM probe_result`).Scan(&probes)
-	jsonOut(w, map[string]int64{"bbs": bbs, "endpoints": endpoints, "probes": probes})
+
+	statusCounts := map[string]int64{}
+	rows, err := s.db.QueryContext(r.Context(), `
+SELECT status,count(*) FROM probe_result p
+WHERE p.id IN (SELECT (SELECT p2.id FROM probe_result p2 WHERE p2.endpoint_id=e.id ORDER BY p2.checked_at DESC,p2.id DESC LIMIT 1) FROM endpoint e)
+GROUP BY status`)
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var status string
+			var count int64
+			if rows.Scan(&status, &count) == nil {
+				statusCounts[status] = count
+			}
+		}
+	}
+
+	jsonOut(w, map[string]any{"bbs": bbs, "endpoints": endpoints, "probes": probes, "status": statusCounts})
 }
