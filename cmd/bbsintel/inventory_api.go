@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/Ploos-AS/BBSIntel/internal/cursor"
+	"github.com/Ploos-AS/BBSIntel/internal/publicstats"
 )
 
 const (
@@ -111,7 +112,6 @@ LIMIT ?`,
 		return
 	}
 	if nextName != "" {
-		// Cursor points after the final returned row, not after the lookahead row.
 		last := out[len(out)-1]
 		w.Header().Set("X-Next-Cursor", cursor.Encode("v1", strings.ToLower(last["name"].(string)), strconv.FormatInt(last["id"].(int64), 10), filters.Query, filters.Software, filters.Country, filters.Protocol, filters.Source))
 		_ = nextID
@@ -222,41 +222,11 @@ WHERE e.bbs_id=? ORDER BY e.id`, id)
 }
 
 func (s *server) stats(w http.ResponseWriter, r *http.Request) {
-	var bbs, endpoints, probes int64
-	_ = s.db.QueryRowContext(r.Context(), `SELECT count(*) FROM bbs`).Scan(&bbs)
-	_ = s.db.QueryRowContext(r.Context(), `SELECT count(*) FROM endpoint`).Scan(&endpoints)
-	_ = s.db.QueryRowContext(r.Context(), `SELECT count(*) FROM probe_result`).Scan(&probes)
-
-	statusCounts := map[string]int64{}
-	rows, err := s.db.QueryContext(r.Context(), `
-SELECT status,count(*) FROM probe_result p
-WHERE p.id IN (SELECT (SELECT p2.id FROM probe_result p2 WHERE p2.endpoint_id=e.id ORDER BY p2.checked_at DESC,p2.id DESC LIMIT 1) FROM endpoint e)
-GROUP BY status`)
-	if err == nil {
-		defer rows.Close()
-		for rows.Next() {
-			var status string
-			var count int64
-			if err := rows.Scan(&status, &count); err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-			statusCounts[status] = count
-		}
-		if err := rows.Err(); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
+	snapshot, err := publicstats.Runtime(r.Context(), s.db)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
-
-	var mismatches int64
-	_ = s.db.QueryRowContext(r.Context(), `
-SELECT count(*) FROM bbs b
-WHERE trim(b.software)<>'' AND EXISTS (
- SELECT 1 FROM endpoint e JOIN probe_result p ON p.endpoint_id=e.id
- WHERE e.bbs_id=b.id AND trim(p.detected_software)<>'' AND lower(trim(p.detected_software))<>lower(trim(b.software))
- AND p.id=(SELECT p2.id FROM probe_result p2 WHERE p2.endpoint_id=e.id ORDER BY p2.checked_at DESC,p2.id DESC LIMIT 1)
-)`).Scan(&mismatches)
-
-	jsonOut(w, map[string]any{"bbs": bbs, "endpoints": endpoints, "probes": probes, "status": statusCounts, "software_mismatches": mismatches})
+	w.Header().Set("Cache-Control", "public, max-age=30")
+	jsonOut(w, snapshot)
 }
