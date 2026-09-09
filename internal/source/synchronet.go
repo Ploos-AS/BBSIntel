@@ -138,23 +138,32 @@ func directCells(row *html.Node) []*html.Node {
 	return out
 }
 
+// nodeTextLines preserves visual line boundaries created by <br> while joining
+// adjacent text nodes (for example an <a> hostname followed by " (telnet)").
 func nodeTextLines(n *html.Node) []string {
-	var raw []string
+	var b strings.Builder
 	var walk func(*html.Node)
 	walk = func(x *html.Node) {
+		if x.Type == html.ElementNode && x.Data == "br" {
+			b.WriteByte('\n')
+			return
+		}
 		if x.Type == html.TextNode {
-			for _, part := range strings.Split(x.Data, "\n") {
-				if s := strings.TrimSpace(part); s != "" {
-					raw = append(raw, strings.Join(strings.Fields(s), " "))
-				}
-			}
+			b.WriteString(x.Data)
 		}
 		for c := x.FirstChild; c != nil; c = c.NextSibling {
 			walk(c)
 		}
 	}
 	walk(n)
-	return raw
+
+	var out []string
+	for _, part := range strings.Split(b.String(), "\n") {
+		if s := strings.TrimSpace(part); s != "" {
+			out = append(out, strings.Join(strings.Fields(s), " "))
+		}
+	}
+	return out
 }
 
 func normalizeSourceKey(s string) string {
