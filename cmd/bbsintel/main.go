@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/Ploos-AS/BBSIntel/internal/buildinfo"
+	"github.com/Ploos-AS/BBSIntel/internal/dbmaint"
 	"github.com/Ploos-AS/BBSIntel/internal/ingest"
 	"github.com/Ploos-AS/BBSIntel/internal/probe"
 	"github.com/Ploos-AS/BBSIntel/internal/scheduler"
@@ -37,6 +38,22 @@ func main() {
 
 	listen := env("BBSINTEL_LISTEN", ":8080")
 	dbPath := env("BBSINTEL_DB", "./data/bbsintel.db")
+	if len(os.Args) >= 3 && os.Args[1] == "maintenance" && os.Args[2] == "restore" {
+		if len(os.Args) != 4 {
+			log.Fatal("usage: bbsintel maintenance restore <backup.db>")
+		}
+		previous, err := dbmaint.RestoreFile(context.Background(), os.Args[3], dbPath, time.Now().UTC())
+		if err != nil {
+			log.Fatal(err)
+		}
+		if previous != "" {
+			log.Printf("restore complete: database=%s previous=%s", dbPath, previous)
+		} else {
+			log.Printf("restore complete: database=%s", dbPath)
+		}
+		return
+	}
+
 	s, err := store.Open(dbPath)
 	if err != nil {
 		log.Fatal(err)
