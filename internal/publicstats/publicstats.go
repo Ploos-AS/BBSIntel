@@ -67,7 +67,10 @@ FROM bbs b LEFT JOIN public_bbs_presence p ON p.bbs_id=b.id`)
 	if err != nil {
 		return err
 	}
-	type presence struct{ id int64; active, previous int }
+	type presence struct {
+		id               int64
+		active, previous int
+	}
 	var states []presence
 	for rows.Next() {
 		var p presence
