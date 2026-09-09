@@ -39,7 +39,7 @@ func ForBBS(ctx context.Context, db *sql.DB, bbsID string) (Summary, error) {
 
 	rows, err := db.QueryContext(ctx, `
 SELECT reported_name,reported_software,reported_country,reported_description
-FROM source_entry WHERE bbs_id=? ORDER BY source,source_key`, bbsID)
+FROM source_entry WHERE bbs_id=? AND active=1 ORDER BY source,source_key`, bbsID)
 	if err != nil {
 		return out, err
 	}
