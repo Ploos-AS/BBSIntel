@@ -23,6 +23,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.24.x'
+      - run: go mod tidy && git diff --exit-code -- go.mod go.sum
       - run: go build -o bbsintel ./cmd/bbsintel
       - name: Import Telnet BBS Guide
         env:
