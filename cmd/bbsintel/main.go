@@ -34,12 +34,21 @@ func main() {
 	}
 	defer s.Close()
 
-	if len(os.Args) >= 3 && os.Args[1] == "import" && os.Args[2] == "telnetbbsguide" {
-		n, err := ingest.Import(context.Background(), s.DB, &source.TelnetBBSGuide{})
+	if len(os.Args) >= 3 && os.Args[1] == "import" {
+		var adapter source.Adapter
+		switch os.Args[2] {
+		case "telnetbbsguide":
+			adapter = &source.TelnetBBSGuide{}
+		case "synchronet":
+			adapter = &source.Synchronet{}
+		default:
+			log.Fatalf("unknown import source %q", os.Args[2])
+		}
+		n, err := ingest.Import(context.Background(), s.DB, adapter)
 		if err != nil {
 			log.Fatal(err)
 		}
-		log.Printf("imported %d Telnet BBS Guide entries", n)
+		log.Printf("imported %d entries from %s", n, adapter.Name())
 		return
 	}
 
@@ -177,7 +186,7 @@ LEFT JOIN endpoint e ON e.id=(SELECT e2.id FROM endpoint e2 WHERE e2.bbs_id=b.id
 LEFT JOIN probe_result pr ON pr.id=(SELECT p2.id FROM probe_result p2 WHERE p2.endpoint_id=e.id ORDER BY p2.checked_at DESC,p2.id DESC LIMIT 1)
 ORDER BY lower(b.name)`)
 	if err != nil {
-		http.Error(w, err.Error(), 500)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	defer rows.Close()
@@ -188,15 +197,21 @@ ORDER BY lower(b.name)`)
 		var port int
 		var connectMS int64
 		var confidence float64
-		if rows.Scan(&id, &name, &reportedSoftware, &country, &protocol, &hostname, &port, &status, &checkedAt, &connectMS, &observedSoftware, &confidence, &evidence) == nil {
-			out = append(out, map[string]any{
-				"id": id, "name": name, "reported_software": reportedSoftware, "observed_software": observedSoftware,
-				"software_confidence": confidence, "software_evidence": evidence,
-				"software_mismatch": softwareMismatch(reportedSoftware, observedSoftware), "country": country,
-				"protocol": protocol, "hostname": hostname, "port": port,
-				"status": status, "checked_at": checkedAt, "connect_ms": connectMS,
-			})
+		if err := rows.Scan(&id, &name, &reportedSoftware, &country, &protocol, &hostname, &port, &status, &checkedAt, &connectMS, &observedSoftware, &confidence, &evidence); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
 		}
+		out = append(out, map[string]any{
+			"id": id, "name": name, "reported_software": reportedSoftware, "observed_software": observedSoftware,
+			"software_confidence": confidence, "software_evidence": evidence,
+			"software_mismatch": softwareMismatch(reportedSoftware, observedSoftware), "country": country,
+			"protocol": protocol, "hostname": hostname, "port": port,
+			"status": status, "checked_at": checkedAt, "connect_ms": connectMS,
+		})
+	}
+	if err := rows.Err(); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
 	jsonOut(w, out)
 }
@@ -210,7 +225,7 @@ func (s *server) getBBS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		http.Error(w, err.Error(), 500)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
@@ -223,7 +238,7 @@ FROM endpoint e
 LEFT JOIN probe_result pr ON pr.id=(SELECT p2.id FROM probe_result p2 WHERE p2.endpoint_id=e.id ORDER BY p2.checked_at DESC,p2.id DESC LIMIT 1)
 WHERE e.bbs_id=? ORDER BY e.id`, id)
 	if err != nil {
-		http.Error(w, err.Error(), 500)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	defer rows.Close()
@@ -237,7 +252,7 @@ WHERE e.bbs_id=? ORDER BY e.id`, id)
 		var connectMS int64
 		var confidence float64
 		if err := rows.Scan(&endpointID, &protocol, &hostname, &port, &status, &checkedAt, &connectMS, &bannerBytes, &bannerSHA, &bannerPreview, &detectedSoftware, &confidence, &evidence, &probeError); err != nil {
-			http.Error(w, err.Error(), 500)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 		if confidence > maxConfidence && detectedSoftware != "" {
@@ -251,6 +266,10 @@ WHERE e.bbs_id=? ORDER BY e.id`, id)
 			"observed_software": detectedSoftware, "software_confidence": confidence,
 			"software_evidence": evidence, "error": probeError,
 		})
+	}
+	if err := rows.Err(); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
 	jsonOut(w, map[string]any{
 		"id": id, "name": name, "reported_software": reportedSoftware, "observed_software": observedSoftware,
@@ -275,9 +294,15 @@ GROUP BY status`)
 		for rows.Next() {
 			var status string
 			var count int64
-			if rows.Scan(&status, &count) == nil {
-				statusCounts[status] = count
+			if err := rows.Scan(&status, &count); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
 			}
+			statusCounts[status] = count
+		}
+		if err := rows.Err(); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
 		}
 	}
 
