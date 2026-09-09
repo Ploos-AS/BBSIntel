@@ -22,6 +22,11 @@ func Open(path string) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	// Keep SQLite access predictable under concurrent API reads and scheduler writes.
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
+
 	s := &Store{DB: db}
 	if err := s.migrate(context.Background()); err != nil {
 		db.Close()
@@ -35,6 +40,8 @@ func (s *Store) Close() error { return s.DB.Close() }
 func (s *Store) migrate(ctx context.Context) error {
 	const schema = `
 PRAGMA foreign_keys=ON;
+PRAGMA journal_mode=WAL;
+PRAGMA busy_timeout=5000;
 CREATE TABLE IF NOT EXISTS bbs (
  id INTEGER PRIMARY KEY,
  name TEXT NOT NULL,
