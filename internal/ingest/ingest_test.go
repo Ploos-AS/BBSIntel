@@ -26,11 +26,11 @@ func TestImportReusesBBSAcrossSourcesForSameEndpoint(t *testing.T) {
 	defer s.Close()
 
 	first := staticAdapter{name: "one", entries: []source.Entry{{
-		Source: "one", SourceKey: "one-key", Name: "Canonical BBS", Software: "Mystic",
+		Source: "one", SourceKey: "one-key", SourceURL: "https://one.example", Name: "Canonical BBS", Software: "Mystic", Country: "NO", Description: "First source",
 		Protocol: "telnet", Hostname: "bbs.example", Port: 23,
 	}}}
 	second := staticAdapter{name: "two", entries: []source.Entry{{
-		Source: "two", SourceKey: "two-key", Name: "Different Directory Name", Software: "Synchronet",
+		Source: "two", SourceKey: "two-key", SourceURL: "https://two.example", Name: "Different Directory Name", Software: "Synchronet", Country: "US", Description: "Second source",
 		Protocol: "telnet", Hostname: "BBS.EXAMPLE", Port: 23,
 	}}}
 
@@ -55,6 +55,16 @@ func TestImportReusesBBSAcrossSourcesForSameEndpoint(t *testing.T) {
 	}
 	if name != "Canonical BBS" || software != "Mystic" {
 		t.Fatalf("canonical metadata overwritten: name=%q software=%q", name, software)
+	}
+
+	var reportedName, reportedSoftware, reportedCountry, reportedDescription string
+	if err := s.DB.QueryRow(`SELECT reported_name,reported_software,reported_country,reported_description FROM source_entry WHERE source='two'`).Scan(
+		&reportedName, &reportedSoftware, &reportedCountry, &reportedDescription,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if reportedName != "Different Directory Name" || reportedSoftware != "Synchronet" || reportedCountry != "US" || reportedDescription != "Second source" {
+		t.Fatalf("source provenance lost: %q %q %q %q", reportedName, reportedSoftware, reportedCountry, reportedDescription)
 	}
 }
 
