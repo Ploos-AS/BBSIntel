@@ -11,6 +11,7 @@ import (
 
 type Endpoint struct {
 	ID       int64
+	BBSID    int64
 	Protocol string
 	Hostname string
 	Port     int
@@ -52,7 +53,7 @@ func (w Worker) Run(ctx context.Context) (int, error) {
 		baseInterval = 30 * time.Minute
 	}
 
-	rows, err := w.DB.QueryContext(ctx, `SELECT id,protocol,hostname,port FROM endpoint ORDER BY id`)
+	rows, err := w.DB.QueryContext(ctx, `SELECT id,bbs_id,protocol,hostname,port FROM endpoint ORDER BY id`)
 	if err != nil {
 		return 0, err
 	}
@@ -60,7 +61,7 @@ func (w Worker) Run(ctx context.Context) (int, error) {
 	var endpoints []Endpoint
 	for rows.Next() {
 		var e Endpoint
-		if err := rows.Scan(&e.ID, &e.Protocol, &e.Hostname, &e.Port); err != nil {
+		if err := rows.Scan(&e.ID, &e.BBSID, &e.Protocol, &e.Hostname, &e.Port); err != nil {
 			rows.Close()
 			return 0, err
 		}
@@ -103,6 +104,9 @@ func (w Worker) Run(ctx context.Context) (int, error) {
 				if !due {
 					continue
 				}
+
+				var previousStatus, previousSoftware string
+				_ = w.DB.QueryRowContext(ctx, `SELECT status,COALESCE(detected_software,'') FROM probe_result WHERE endpoint_id=? ORDER BY checked_at DESC,id DESC LIMIT 1`, e.ID).Scan(&previousStatus, &previousSoftware)
 				result := fn(ctx, e.Hostname, e.Port)
 				_, err = w.DB.ExecContext(ctx, `
 INSERT INTO probe_result(
@@ -112,6 +116,20 @@ INSERT INTO probe_result(
 				if err != nil {
 					errCh <- fmt.Errorf("store probe result for endpoint %d: %w", e.ID, err)
 					continue
+				}
+				if previousStatus != "" && previousStatus != result.Status {
+					if _, err := w.DB.ExecContext(ctx, `INSERT INTO change_event(bbs_id,endpoint_id,kind,field,old_value,new_value,detail) VALUES(?,?,?,?,?,?,?)`,
+						e.BBSID, e.ID, "status_changed", "status", previousStatus, result.Status, fmt.Sprintf("%s://%s:%d", e.Protocol, e.Hostname, e.Port)); err != nil {
+						errCh <- err
+						continue
+					}
+				}
+				if previousSoftware != "" && result.DetectedSoftware != "" && previousSoftware != result.DetectedSoftware {
+					if _, err := w.DB.ExecContext(ctx, `INSERT INTO change_event(bbs_id,endpoint_id,kind,field,old_value,new_value,detail) VALUES(?,?,?,?,?,?,?)`,
+						e.BBSID, e.ID, "software_changed", "observed_software", previousSoftware, result.DetectedSoftware, result.SoftwareEvidence); err != nil {
+						errCh <- err
+						continue
+					}
 				}
 				probed.Add(1)
 			}
