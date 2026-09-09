@@ -33,6 +33,8 @@ type sourceHealthView struct {
 	LastError           string `json:"last_error,omitempty"`
 	Freshness           string `json:"freshness"`
 	SuccessAgeSeconds   int64  `json:"success_age_seconds"`
+	PersistedState      string `json:"persisted_state"`
+	StateChangedAt      string `json:"state_changed_at"`
 	Healthy             bool   `json:"healthy"`
 }
 
@@ -78,7 +80,7 @@ FROM source_entry WHERE bbs_id=? ORDER BY active DESC,source,source_key`, id)
 
 func (s *server) getSourceHealth(w http.ResponseWriter, r *http.Request) {
 	rows, err := s.db.QueryContext(r.Context(), `
-SELECT source,last_attempt_at,last_success_at,last_failure_at,last_duration_ms,last_entry_count,consecutive_failures,last_error
+SELECT source,last_attempt_at,last_success_at,last_failure_at,last_duration_ms,last_entry_count,consecutive_failures,last_error,current_state,state_changed_at
 FROM source_health ORDER BY source`)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -90,7 +92,7 @@ FROM source_health ORDER BY source`)
 	out := []sourceHealthView{}
 	for rows.Next() {
 		var v sourceHealthView
-		if err := rows.Scan(&v.Source, &v.LastAttemptAt, &v.LastSuccessAt, &v.LastFailureAt, &v.LastDurationMS, &v.LastEntryCount, &v.ConsecutiveFailures, &v.LastError); err != nil {
+		if err := rows.Scan(&v.Source, &v.LastAttemptAt, &v.LastSuccessAt, &v.LastFailureAt, &v.LastDurationMS, &v.LastEntryCount, &v.ConsecutiveFailures, &v.LastError, &v.PersistedState, &v.StateChangedAt); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
