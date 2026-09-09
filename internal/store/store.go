@@ -73,6 +73,16 @@ CREATE TABLE IF NOT EXISTS source_entry (
  missing_since TEXT NOT NULL DEFAULT '',
  UNIQUE(source, source_key)
 );
+CREATE TABLE IF NOT EXISTS source_health (
+ source TEXT PRIMARY KEY,
+ last_attempt_at TEXT NOT NULL DEFAULT '',
+ last_success_at TEXT NOT NULL DEFAULT '',
+ last_failure_at TEXT NOT NULL DEFAULT '',
+ last_duration_ms INTEGER NOT NULL DEFAULT 0,
+ last_entry_count INTEGER NOT NULL DEFAULT 0,
+ consecutive_failures INTEGER NOT NULL DEFAULT 0,
+ last_error TEXT NOT NULL DEFAULT ''
+);
 CREATE TABLE IF NOT EXISTS probe_result (
  id INTEGER PRIMARY KEY,
  endpoint_id INTEGER NOT NULL REFERENCES endpoint(id) ON DELETE CASCADE,
