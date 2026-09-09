@@ -49,6 +49,9 @@ func Telnet(ctx context.Context, hostname string, port int) Result {
 	n, err := conn.Read(buf)
 	if n > 0 {
 		clean := cleanTelnetBanner(buf[:n])
+		if len(bytes.TrimSpace(clean)) == 0 {
+			return Result{Status: "telnet_only", ConnectMS: connectMS, BannerBytes: n}
+		}
 		sum := sha256.Sum256(clean)
 		preview := bannerPreview(clean, 240)
 		software, confidence, evidence := detectSoftware(preview)
@@ -120,10 +123,14 @@ func cleanTelnetBanner(in []byte) []byte {
 func bannerPreview(in []byte, limit int) string {
 	s := strings.TrimSpace(string(in))
 	s = strings.Join(strings.Fields(s), " ")
-	if len(s) > limit {
-		s = s[:limit]
+	if len(s) <= limit {
+		return s
 	}
-	return s
+	runes := []rune(s)
+	for len(string(runes)) > limit {
+		runes = runes[:len(runes)-1]
+	}
+	return string(runes)
 }
 
 func detectSoftware(preview string) (string, float64, string) {
