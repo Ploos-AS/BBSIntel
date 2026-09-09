@@ -1,10 +1,6 @@
 name: Live qualification
 
-# Temporary push trigger is retained only while M1.10 live qualification is being closed.
 on:
-  push:
-    paths:
-      - '.github/workflows/qualification.yml'
   workflow_dispatch:
     inputs:
       probe_limit:
