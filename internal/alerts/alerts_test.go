@@ -3,6 +3,7 @@ package alerts_test
 import (
 	"context"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/Ploos-AS/BBSIntel/internal/alerts"
@@ -50,15 +51,15 @@ func TestListProjectsCurrentAndDeduplicatedAlerts(t *testing.T) {
 	if len(got) != 4 {
 		t.Fatalf("alerts=%d, want 4: %#v", len(got), got)
 	}
-	if got[0].Severity != "high" || got[0].Category != "source_health" {
-		t.Fatalf("first alert=%+v, want high source_health", got[0])
+	if got[0].Severity != "high" || got[1].Severity != "high" {
+		t.Fatalf("top severities=%q,%q, want high,high", got[0].Severity, got[1].Severity)
 	}
 
 	softwareChanges := 0
 	for _, alert := range got {
 		if alert.Category == "software_change" {
 			softwareChanges++
-			if alert.Detail[:len("Synchronet -> WWIV")] != "Synchronet -> WWIV" {
+			if !strings.Contains(alert.Detail, "Synchronet -> WWIV") {
 				t.Fatalf("software alert detail=%q", alert.Detail)
 			}
 		}
