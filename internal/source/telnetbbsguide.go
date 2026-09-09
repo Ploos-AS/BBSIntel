@@ -121,6 +121,7 @@ func textLines(n *html.Node) []string {
 				if s = strings.TrimSpace(s); s != "" {
 					raw = append(raw, s)
 				}
+			}
 		}
 		for c := x.FirstChild; c != nil; c = c.NextSibling {
 			walk(c)
