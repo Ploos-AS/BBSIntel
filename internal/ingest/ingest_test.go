@@ -15,7 +15,7 @@ type staticAdapter struct {
 	entries []source.Entry
 }
 
-func (a staticAdapter) Name() string { return a.name }
+func (a staticAdapter) Name() string                                  { return a.name }
 func (a staticAdapter) Fetch(context.Context) ([]source.Entry, error) { return a.entries, nil }
 
 func TestImportReusesBBSAcrossSourcesForSameEndpoint(t *testing.T) {
