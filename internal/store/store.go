@@ -111,9 +111,38 @@ CREATE TABLE IF NOT EXISTS change_event (
  new_value TEXT NOT NULL DEFAULT '',
  detail TEXT NOT NULL DEFAULT ''
 );
+CREATE TABLE IF NOT EXISTS endpoint_hourly (
+ endpoint_id INTEGER NOT NULL REFERENCES endpoint(id) ON DELETE CASCADE,
+ bucket_start TEXT NOT NULL,
+ checks INTEGER NOT NULL,
+ online_checks INTEGER NOT NULL,
+ telnet_only_checks INTEGER NOT NULL,
+ tcp_only_checks INTEGER NOT NULL,
+ offline_checks INTEGER NOT NULL,
+ dns_fail_checks INTEGER NOT NULL,
+ connect_ms_sum INTEGER NOT NULL,
+ connect_ms_count INTEGER NOT NULL,
+ PRIMARY KEY(endpoint_id,bucket_start)
+);
+CREATE TABLE IF NOT EXISTS endpoint_daily (
+ endpoint_id INTEGER NOT NULL REFERENCES endpoint(id) ON DELETE CASCADE,
+ bucket_start TEXT NOT NULL,
+ checks INTEGER NOT NULL,
+ online_checks INTEGER NOT NULL,
+ telnet_only_checks INTEGER NOT NULL,
+ tcp_only_checks INTEGER NOT NULL,
+ offline_checks INTEGER NOT NULL,
+ dns_fail_checks INTEGER NOT NULL,
+ connect_ms_sum INTEGER NOT NULL,
+ connect_ms_count INTEGER NOT NULL,
+ PRIMARY KEY(endpoint_id,bucket_start)
+);
 CREATE INDEX IF NOT EXISTS idx_probe_endpoint_checked ON probe_result(endpoint_id, checked_at DESC);
+CREATE INDEX IF NOT EXISTS idx_probe_checked ON probe_result(checked_at);
 CREATE INDEX IF NOT EXISTS idx_change_event_occurred ON change_event(occurred_at DESC,id DESC);
 CREATE INDEX IF NOT EXISTS idx_change_event_bbs ON change_event(bbs_id,occurred_at DESC,id DESC);
+CREATE INDEX IF NOT EXISTS idx_endpoint_hourly_bucket ON endpoint_hourly(bucket_start,endpoint_id);
+CREATE INDEX IF NOT EXISTS idx_endpoint_daily_bucket ON endpoint_daily(bucket_start,endpoint_id);
 `
 	if _, err := s.DB.ExecContext(ctx, schema); err != nil {
 		return fmt.Errorf("migrate: %w", err)

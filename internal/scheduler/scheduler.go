@@ -10,6 +10,7 @@ import (
 
 	"github.com/Ploos-AS/BBSIntel/internal/ingest"
 	"github.com/Ploos-AS/BBSIntel/internal/probe"
+	"github.com/Ploos-AS/BBSIntel/internal/rollup"
 	"github.com/Ploos-AS/BBSIntel/internal/source"
 	"github.com/Ploos-AS/BBSIntel/internal/sourcehealth"
 )
@@ -46,6 +47,9 @@ func (s Scheduler) Run(ctx context.Context) error {
 	if err := s.probeOnce(ctx, cfg.Concurrency, cfg.ProbeInterval); err != nil {
 		log.Printf("initial probe failed: %v", err)
 	}
+	if err := s.refreshRollups(ctx); err != nil {
+		log.Printf("initial rollup refresh failed: %v", err)
+	}
 
 	importTicker := time.NewTicker(cfg.ImportInterval)
 	defer importTicker.Stop()
@@ -66,6 +70,9 @@ func (s Scheduler) Run(ctx context.Context) error {
 		case <-probeTicker.C:
 			if err := s.probeOnce(ctx, cfg.Concurrency, cfg.ProbeInterval); err != nil {
 				log.Printf("scheduled probe failed: %v", err)
+			}
+			if err := s.refreshRollups(ctx); err != nil {
+				log.Printf("scheduled rollup refresh failed: %v", err)
 			}
 			if err := s.evaluateSourceHealth(ctx); err != nil {
 				log.Printf("scheduled source health evaluation failed: %v", err)
@@ -97,6 +104,14 @@ func (s Scheduler) probeOnce(ctx context.Context, concurrency int, baseInterval 
 		return err
 	}
 	log.Printf("scheduled probe completed: %d endpoints probed", n)
+	return nil
+}
+
+func (s Scheduler) refreshRollups(ctx context.Context) error {
+	if err := rollup.Refresh(ctx, s.DB, time.Now().UTC()); err != nil {
+		return err
+	}
+	log.Printf("statistics rollups refreshed")
 	return nil
 }
 
