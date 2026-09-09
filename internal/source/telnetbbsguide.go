@@ -59,10 +59,12 @@ func parseTelnetBBSGuide(r interface{ Read([]byte) (int, error) }, pageURL strin
 	lines := textLines(doc)
 	var out []Entry
 	for i := 0; i < len(lines); i++ {
-		if !strings.HasPrefix(lines[i], "Telnet:") {
+		protocol, defaultPort, ok := connectionLabel(lines[i])
+		if !ok {
 			continue
 		}
-		endpoint := strings.TrimSpace(strings.TrimPrefix(lines[i], "Telnet:"))
+		label := strings.Title(protocol) + ":"
+		endpoint := strings.TrimSpace(strings.TrimPrefix(lines[i], label))
 		if endpoint == "" && i+1 < len(lines) {
 			i++
 			endpoint = strings.TrimSpace(lines[i])
@@ -78,23 +80,34 @@ func parseTelnetBBSGuide(r interface{ Read([]byte) (int, error) }, pageURL strin
 				break
 			}
 		}
-		host, port := splitEndpoint(endpoint, 23)
+		host, port := splitEndpoint(endpoint, defaultPort)
 		if host == "" {
 			continue
 		}
-		key := strings.ToLower(host) + ":" + strconv.Itoa(port)
+		key := protocol + ":" + strings.ToLower(host) + ":" + strconv.Itoa(port)
 		out = append(out, Entry{
 			Source:    "telnetbbsguide",
 			SourceKey: key,
 			SourceURL: pageURL,
 			Name:      name,
 			Software:  software,
-			Protocol:  "telnet",
+			Protocol:  protocol,
 			Hostname:  host,
 			Port:      port,
 		})
 	}
 	return out, nil
+}
+
+func connectionLabel(line string) (string, int, bool) {
+	switch {
+	case strings.HasPrefix(line, "Telnet:"):
+		return "telnet", 23, true
+	case strings.HasPrefix(line, "SSH:"):
+		return "ssh", 22, true
+	default:
+		return "", 0, false
+	}
 }
 
 func textLines(n *html.Node) []string {
@@ -106,7 +119,6 @@ func textLines(n *html.Node) []string {
 				if s = strings.TrimSpace(s); s != "" {
 					raw = append(raw, s)
 				}
-			}
 		}
 		for c := x.FirstChild; c != nil; c = c.NextSibling {
 			walk(c)
