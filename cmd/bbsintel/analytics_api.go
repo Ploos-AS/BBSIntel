@@ -14,6 +14,7 @@ func registerAnalyticsRoutes(mux *http.ServeMux, srv *server) {
 	mux.HandleFunc("GET /api/v1/bbs/{id}/analytics", srv.bbsAnalytics)
 	mux.HandleFunc("GET /api/v1/bbs/{id}/history", srv.bbsHistory)
 	mux.HandleFunc("GET /api/v1/statistics/daily", srv.dailyStatistics)
+	registerPublicStatisticsRoutes(mux, srv)
 }
 
 func (s *server) bbsAnalytics(w http.ResponseWriter, r *http.Request) {
