@@ -11,9 +11,6 @@ permissions:
 
 env:
   IMAGE_GHCR: ghcr.io/ploos-as/bbsintel
-  DOCKERHUB_IMAGE: ploosas/bbsintel
-  DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-  DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
 
 jobs:
   validate:
@@ -71,6 +68,9 @@ jobs:
   image:
     needs: validate
     runs-on: ubuntu-latest
+    env:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-qemu-action@v3
@@ -116,8 +116,8 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           tags: |
-            ${{ env.DOCKERHUB_IMAGE }}:${{ steps.meta.outputs.version }}
-            ${{ env.DOCKERHUB_IMAGE }}:latest
+            ${{ env.DOCKERHUB_USERNAME }}/bbsintel:${{ steps.meta.outputs.version }}
+            ${{ env.DOCKERHUB_USERNAME }}/bbsintel:latest
           build-args: |
             VERSION=${{ steps.meta.outputs.version }}
             VCS_REF=${{ github.sha }}
