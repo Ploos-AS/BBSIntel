@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -18,10 +19,10 @@ type Endpoint struct {
 type ProbeFunc func(context.Context, string, int) Result
 
 type Worker struct {
-	DB          *sql.DB
-	Concurrency int
-	TelnetProbe ProbeFunc
-	Now         func() time.Time
+	DB           *sql.DB
+	Concurrency  int
+	TelnetProbe  ProbeFunc
+	Now          func() time.Time
 	BaseInterval time.Duration
 }
 
@@ -70,6 +71,7 @@ func (w Worker) Run(ctx context.Context) (int, error) {
 
 	jobs := make(chan Endpoint)
 	errCh := make(chan error, len(endpoints))
+	var probed atomic.Int64
 	var wg sync.WaitGroup
 	for i := 0; i < concurrency; i++ {
 		wg.Add(1)
@@ -93,7 +95,9 @@ func (w Worker) Run(ctx context.Context) (int, error) {
 				result := telnetProbe(ctx, e.Hostname, e.Port)
 				if _, err := w.DB.ExecContext(ctx, `INSERT INTO probe_result(endpoint_id,status,connect_ms,banner_bytes,error) VALUES(?,?,?,?,?)`, e.ID, result.Status, nullableConnectMS(result.ConnectMS), result.BannerBytes, result.Error); err != nil {
 					errCh <- fmt.Errorf("store probe result for endpoint %d: %w", e.ID, err)
+					continue
 				}
+				probed.Add(1)
 			}
 		}()
 	}
@@ -112,21 +116,14 @@ func (w Worker) Run(ctx context.Context) (int, error) {
 	wg.Wait()
 	close(errCh)
 	if err := ctx.Err(); err != nil {
-		return 0, err
+		return int(probed.Load()), err
 	}
 	for err := range errCh {
 		if err != nil {
-			return 0, err
+			return int(probed.Load()), err
 		}
 	}
-
-	count := 0
-	for _, e := range endpoints {
-		if e.Protocol == "telnet" {
-			count++
-		}
-	}
-	return count, nil
+	return int(probed.Load()), nil
 }
 
 func (w Worker) endpointDue(ctx context.Context, endpointID int64, now time.Time, base time.Duration) (bool, error) {
