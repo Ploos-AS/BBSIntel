@@ -75,6 +75,9 @@ CREATE TABLE IF NOT EXISTS probe_result (
  status TEXT NOT NULL,
  connect_ms INTEGER,
  banner_bytes INTEGER NOT NULL DEFAULT 0,
+ banner_sha256 TEXT NOT NULL DEFAULT '',
+ banner_preview TEXT NOT NULL DEFAULT '',
+ detected_software TEXT NOT NULL DEFAULT '',
  error TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_probe_endpoint_checked ON probe_result(endpoint_id, checked_at DESC);
@@ -82,5 +85,30 @@ CREATE INDEX IF NOT EXISTS idx_probe_endpoint_checked ON probe_result(endpoint_i
 	if _, err := s.DB.ExecContext(ctx, schema); err != nil {
 		return fmt.Errorf("migrate: %w", err)
 	}
+	for _, stmt := range []string{
+		`ALTER TABLE probe_result ADD COLUMN banner_sha256 TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE probe_result ADD COLUMN banner_preview TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE probe_result ADD COLUMN detected_software TEXT NOT NULL DEFAULT ''`,
+	} {
+		if _, err := s.DB.ExecContext(ctx, stmt); err != nil && !isDuplicateColumn(err) {
+			return fmt.Errorf("migrate probe_result: %w", err)
+		}
+	}
 	return nil
+}
+
+func isDuplicateColumn(err error) bool {
+	if err == nil {
+		return false
+	}
+	return len(err.Error()) >= 21 && (err.Error() == "duplicate column name" || contains(err.Error(), "duplicate column name"))
+}
+
+func contains(s, sub string) bool {
+	for i := 0; i+len(sub) <= len(s); i++ {
+		if s[i:i+len(sub)] == sub {
+			return true
+		}
+	}
+	return false
 }
