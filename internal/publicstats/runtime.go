@@ -10,7 +10,7 @@ import (
 type RuntimeSnapshot struct {
 	BBS                int64            `json:"bbs"`
 	Endpoints          int64            `json:"endpoints"`
-	ProbesRetained     int64            `json:"probes_retained"`
+	Probes             int64            `json:"probes"`
 	SoftwareMismatches int64            `json:"software_mismatches"`
 	Status             map[string]int64 `json:"status"`
 	RefreshedAt        string           `json:"refreshed_at"`
@@ -79,9 +79,9 @@ GROUP BY p.status`)
 		return err
 	}
 	metrics := map[string]int64{
-		"bbs": bbs,
-		"endpoints": endpoints,
-		"probes_retained": probes,
+		"bbs":                 bbs,
+		"endpoints":           endpoints,
+		"probes":              probes,
 		"software_mismatches": mismatches,
 	}
 	for key, value := range metrics {
@@ -118,8 +118,8 @@ func Runtime(ctx context.Context, db *sql.DB) (RuntimeSnapshot, error) {
 			out.BBS = value
 		case "endpoints":
 			out.Endpoints = value
-		case "probes_retained":
-			out.ProbesRetained = value
+		case "probes":
+			out.Probes = value
 		case "software_mismatches":
 			out.SoftwareMismatches = value
 		default:
