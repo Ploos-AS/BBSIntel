@@ -207,18 +207,25 @@ func backoffInterval(statuses []string, base time.Duration) time.Duration {
 	}
 	switch {
 	case failures >= 4:
-		return 24 * time.Hour
+		return maxDuration(base, 24*time.Hour)
 	case failures == 3:
-		return 6 * time.Hour
+		return maxDuration(base, 6*time.Hour)
 	case failures == 2:
-		return time.Hour
+		return maxDuration(base, time.Hour)
 	default:
 		return base
 	}
 }
 
+func maxDuration(a, b time.Duration) time.Duration {
+	if a > b {
+		return a
+	}
+	return b
+}
+
 func isHealthy(status string) bool {
-	return status == "online" || status == "tcp_only"
+	return status == "online" || status == "tcp_only" || status == "telnet_only"
 }
 
 func nullableConnectMS(ms int64) any {
