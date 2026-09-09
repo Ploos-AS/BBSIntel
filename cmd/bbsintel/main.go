@@ -92,6 +92,7 @@ func main() {
 	registerSourceRoutes(mux, srv)
 	registerIntelRoutes(mux, srv)
 	registerEventRoutes(mux, srv)
+	registerAlertRoutes(mux, srv)
 
 	httpServer := &http.Server{Addr: listen, Handler: mux, ReadHeaderTimeout: 5 * time.Second}
 	go func() {
