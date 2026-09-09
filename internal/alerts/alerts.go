@@ -5,7 +5,10 @@ import (
 	"database/sql"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
+
+	"github.com/Ploos-AS/BBSIntel/internal/cursor"
 )
 
 type Alert struct {
@@ -26,6 +29,13 @@ type Filter struct {
 	Category        string
 	Source          string
 	BBSID           int64
+	Since           string
+	Cursor          string
+}
+
+type Page struct {
+	Items      []Alert
+	NextCursor string
 }
 
 type Stats struct {
@@ -42,11 +52,23 @@ func List(ctx context.Context, db *sql.DB, limit int, minimumSeverity string) ([
 }
 
 func Query(ctx context.Context, db *sql.DB, filter Filter) ([]Alert, error) {
-	all, err := collect(ctx, db)
+	page, err := QueryPage(ctx, db, filter)
 	if err != nil {
 		return nil, err
 	}
+	return page.Items, nil
+}
+
+func QueryPage(ctx context.Context, db *sql.DB, filter Filter) (Page, error) {
+	all, err := collect(ctx, db)
+	if err != nil {
+		return Page{}, err
+	}
 	filtered := applyFilter(all, filter)
+	filtered, err = applyCursor(filtered, filter.Cursor)
+	if err != nil {
+		return Page{}, err
+	}
 	limit := filter.Limit
 	if limit <= 0 {
 		limit = 200
@@ -54,10 +76,12 @@ func Query(ctx context.Context, db *sql.DB, filter Filter) ([]Alert, error) {
 	if limit > 1000 {
 		limit = 1000
 	}
+	page := Page{Items: filtered}
 	if len(filtered) > limit {
-		filtered = filtered[:limit]
+		page.Items = filtered[:limit]
+		page.NextCursor = encodeAlertCursor(page.Items[len(page.Items)-1])
 	}
-	return filtered, nil
+	return page, nil
 }
 
 func Summarize(ctx context.Context, db *sql.DB, filter Filter) (Stats, error) {
@@ -66,6 +90,7 @@ func Summarize(ctx context.Context, db *sql.DB, filter Filter) (Stats, error) {
 		return Stats{}, err
 	}
 	filter.Limit = 0
+	filter.Cursor = ""
 	filtered := applyFilter(all, filter)
 	out := Stats{
 		Total:      len(filtered),
@@ -120,6 +145,7 @@ func applyFilter(in []Alert, filter Filter) []Alert {
 	}
 	category := strings.ToLower(strings.TrimSpace(filter.Category))
 	source := strings.ToLower(strings.TrimSpace(filter.Source))
+	since := strings.TrimSpace(filter.Since)
 	out := make([]Alert, 0, len(in))
 	for _, alert := range in {
 		if severityRank[alert.Severity] < minRank {
@@ -134,9 +160,42 @@ func applyFilter(in []Alert, filter Filter) []Alert {
 		if filter.BBSID > 0 && alert.BBSID != filter.BBSID {
 			continue
 		}
+		if since != "" && (alert.OccurredAt == "" || alert.OccurredAt <= since) {
+			continue
+		}
 		out = append(out, alert)
 	}
 	return out
+}
+
+func applyCursor(in []Alert, token string) ([]Alert, error) {
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return in, nil
+	}
+	parts, err := cursor.Decode(token, 3)
+	if err != nil {
+		return nil, fmt.Errorf("invalid alert cursor: %w", err)
+	}
+	rank, err := strconv.Atoi(parts[0])
+	if err != nil || rank < 0 || rank > 3 {
+		return nil, fmt.Errorf("invalid alert cursor")
+	}
+	occurredAt, key := parts[1], parts[2]
+	out := make([]Alert, 0, len(in))
+	for _, alert := range in {
+		alertRank := severityRank[alert.Severity]
+		if alertRank < rank ||
+			(alertRank == rank && alert.OccurredAt < occurredAt) ||
+			(alertRank == rank && alert.OccurredAt == occurredAt && alert.Key > key) {
+			out = append(out, alert)
+		}
+	}
+	return out, nil
+}
+
+func encodeAlertCursor(alert Alert) string {
+	return cursor.Encode(strconv.Itoa(severityRank[alert.Severity]), alert.OccurredAt, alert.Key)
 }
 
 func appendSourceHealth(ctx context.Context, db *sql.DB, out *[]Alert) error {
