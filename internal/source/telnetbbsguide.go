@@ -59,11 +59,10 @@ func parseTelnetBBSGuide(r interface{ Read([]byte) (int, error) }, pageURL strin
 	lines := textLines(doc)
 	var out []Entry
 	for i := 0; i < len(lines); i++ {
-		protocol, defaultPort, ok := connectionLabel(lines[i])
+		protocol, label, defaultPort, ok := connectionLabel(lines[i])
 		if !ok {
 			continue
 		}
-		label := strings.Title(protocol) + ":"
 		endpoint := strings.TrimSpace(strings.TrimPrefix(lines[i], label))
 		if endpoint == "" && i+1 < len(lines) {
 			i++
@@ -84,7 +83,10 @@ func parseTelnetBBSGuide(r interface{ Read([]byte) (int, error) }, pageURL strin
 		if host == "" {
 			continue
 		}
-		key := protocol + ":" + strings.ToLower(host) + ":" + strconv.Itoa(port)
+		key := strings.ToLower(host) + ":" + strconv.Itoa(port)
+		if protocol != "telnet" {
+			key = protocol + ":" + key
+		}
 		out = append(out, Entry{
 			Source:    "telnetbbsguide",
 			SourceKey: key,
@@ -99,14 +101,14 @@ func parseTelnetBBSGuide(r interface{ Read([]byte) (int, error) }, pageURL strin
 	return out, nil
 }
 
-func connectionLabel(line string) (string, int, bool) {
+func connectionLabel(line string) (string, string, int, bool) {
 	switch {
 	case strings.HasPrefix(line, "Telnet:"):
-		return "telnet", 23, true
+		return "telnet", "Telnet:", 23, true
 	case strings.HasPrefix(line, "SSH:"):
-		return "ssh", 22, true
+		return "ssh", "SSH:", 22, true
 	default:
-		return "", 0, false
+		return "", "", 0, false
 	}
 }
 
@@ -129,9 +131,9 @@ func textLines(n *html.Node) []string {
 }
 
 func previousName(lines []string, idx int) string {
-	for i := idx - 1; i >= 0 && i >= idx-8; i-- {
+	for i := idx - 1; i >= 0 && i >= idx-10; i-- {
 		s := strings.TrimSpace(lines[i])
-		if s == "Image" || strings.Contains(s, ":") || s == "MORE..." {
+		if s == "Image" || strings.Contains(s, ":") || s == "MORE..." || looksLikeEndpoint(s) {
 			continue
 		}
 		if len(s) > 1 {
@@ -139,6 +141,17 @@ func previousName(lines []string, idx int) string {
 		}
 	}
 	return "Unknown BBS"
+}
+
+func looksLikeEndpoint(s string) bool {
+	s = strings.TrimSpace(s)
+	if s == "" || strings.ContainsAny(s, " \t") {
+		return false
+	}
+	if strings.HasPrefix(s, "telnet://") || strings.HasPrefix(s, "ssh://") {
+		return true
+	}
+	return strings.Contains(s, ".") || strings.HasPrefix(s, "[")
 }
 
 func splitEndpoint(s string, defaultPort int) (string, int) {
