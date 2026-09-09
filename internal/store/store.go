@@ -69,6 +69,8 @@ CREATE TABLE IF NOT EXISTS source_entry (
  reported_country TEXT NOT NULL DEFAULT '',
  reported_description TEXT NOT NULL DEFAULT '',
  last_seen TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+ active INTEGER NOT NULL DEFAULT 1,
+ missing_since TEXT NOT NULL DEFAULT '',
  UNIQUE(source, source_key)
 );
 CREATE TABLE IF NOT EXISTS probe_result (
@@ -100,6 +102,7 @@ CREATE TABLE IF NOT EXISTS change_event (
 CREATE INDEX IF NOT EXISTS idx_probe_endpoint_checked ON probe_result(endpoint_id, checked_at DESC);
 CREATE INDEX IF NOT EXISTS idx_change_event_occurred ON change_event(occurred_at DESC,id DESC);
 CREATE INDEX IF NOT EXISTS idx_change_event_bbs ON change_event(bbs_id,occurred_at DESC,id DESC);
+CREATE INDEX IF NOT EXISTS idx_source_entry_presence ON source_entry(source,active,last_seen);
 `
 	if _, err := s.DB.ExecContext(ctx, schema); err != nil {
 		return fmt.Errorf("migrate: %w", err)
@@ -114,10 +117,15 @@ CREATE INDEX IF NOT EXISTS idx_change_event_bbs ON change_event(bbs_id,occurred_
 		`ALTER TABLE source_entry ADD COLUMN reported_software TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE source_entry ADD COLUMN reported_country TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE source_entry ADD COLUMN reported_description TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE source_entry ADD COLUMN active INTEGER NOT NULL DEFAULT 1`,
+		`ALTER TABLE source_entry ADD COLUMN missing_since TEXT NOT NULL DEFAULT ''`,
 	} {
 		if _, err := s.DB.ExecContext(ctx, stmt); err != nil && !isDuplicateColumn(err) {
 			return fmt.Errorf("migrate: %w", err)
 		}
+	}
+	if _, err := s.DB.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_source_entry_presence ON source_entry(source,active,last_seen)`); err != nil {
+		return fmt.Errorf("migrate source presence index: %w", err)
 	}
 	return nil
 }
