@@ -19,6 +19,7 @@ type sourceView struct {
 
 func registerSourceRoutes(mux *http.ServeMux, srv *server) {
 	mux.HandleFunc("GET /api/v1/bbs/{id}/sources", srv.getBBSSources)
+	registerIntelRoutes(mux, srv)
 }
 
 func (s *server) getBBSSources(w http.ResponseWriter, r *http.Request) {
