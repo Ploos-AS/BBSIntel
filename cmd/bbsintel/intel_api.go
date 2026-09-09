@@ -34,11 +34,12 @@ func (s *server) getBBSIntelligence(w http.ResponseWriter, r *http.Request) {
 
 func (s *server) getIntelligenceStats(w http.ResponseWriter, r *http.Request) {
 	queries := map[string]string{
-		"multi_source_bbs":      `SELECT count(*) FROM bbs b WHERE (SELECT count(*) FROM source_entry s WHERE s.bbs_id=b.id)>1`,
-		"name_conflicts":        `SELECT count(*) FROM bbs b WHERE (SELECT count(DISTINCT lower(trim(reported_name))) FROM source_entry s WHERE s.bbs_id=b.id AND trim(reported_name)<>'')>1`,
-		"software_conflicts":    `SELECT count(*) FROM bbs b WHERE (SELECT count(DISTINCT lower(trim(reported_software))) FROM source_entry s WHERE s.bbs_id=b.id AND trim(reported_software)<>'')>1`,
-		"country_conflicts":     `SELECT count(*) FROM bbs b WHERE (SELECT count(DISTINCT lower(trim(reported_country))) FROM source_entry s WHERE s.bbs_id=b.id AND trim(reported_country)<>'')>1`,
-		"description_conflicts": `SELECT count(*) FROM bbs b WHERE (SELECT count(DISTINCT lower(trim(reported_description))) FROM source_entry s WHERE s.bbs_id=b.id AND trim(reported_description)<>'')>1`,
+		"multi_source_bbs":      `SELECT count(*) FROM bbs b WHERE (SELECT count(*) FROM source_entry s WHERE s.bbs_id=b.id AND s.active=1)>1`,
+		"name_conflicts":        `SELECT count(*) FROM bbs b WHERE (SELECT count(DISTINCT lower(trim(reported_name))) FROM source_entry s WHERE s.bbs_id=b.id AND s.active=1 AND trim(reported_name)<>'')>1`,
+		"software_conflicts":    `SELECT count(*) FROM bbs b WHERE (SELECT count(DISTINCT lower(trim(reported_software))) FROM source_entry s WHERE s.bbs_id=b.id AND s.active=1 AND trim(reported_software)<>'')>1`,
+		"country_conflicts":     `SELECT count(*) FROM bbs b WHERE (SELECT count(DISTINCT lower(trim(reported_country))) FROM source_entry s WHERE s.bbs_id=b.id AND s.active=1 AND trim(reported_country)<>'')>1`,
+		"description_conflicts": `SELECT count(*) FROM bbs b WHERE (SELECT count(DISTINCT lower(trim(reported_description))) FROM source_entry s WHERE s.bbs_id=b.id AND s.active=1 AND trim(reported_description)<>'')>1`,
+		"stale_source_entries":  `SELECT count(*) FROM source_entry WHERE active=0`,
 	}
 	out := map[string]int64{}
 	for key, query := range queries {
