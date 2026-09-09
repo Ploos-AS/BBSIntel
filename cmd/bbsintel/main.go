@@ -122,9 +122,10 @@ func main() {
 	registerEventRoutes(mux, srv)
 	registerAlertRoutes(mux, srv)
 
+	limiter := newInflightLimiter(envInt("BBSINTEL_HTTP_MAX_INFLIGHT", 64))
 	httpServer := &http.Server{
 		Addr:              listen,
-		Handler:           srv.observeHTTP(mux),
+		Handler:           srv.observeHTTP(limiter.middleware(mux)),
 		ReadHeaderTimeout: envDuration("BBSINTEL_HTTP_READ_HEADER_TIMEOUT", 5*time.Second),
 		ReadTimeout:       envDuration("BBSINTEL_HTTP_READ_TIMEOUT", 15*time.Second),
 		WriteTimeout:      envDuration("BBSINTEL_HTTP_WRITE_TIMEOUT", 30*time.Second),
