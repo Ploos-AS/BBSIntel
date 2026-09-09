@@ -18,8 +18,7 @@ func TestWorkerStoresProbeResult(t *testing.T) {
 	}
 	defer s.Close()
 
-	endpointID := insertEndpoint(t, s, "example.invalid", 2323)
-	_ = endpointID
+	insertEndpoint(t, s, "example.invalid", 2323)
 
 	fake := func(context.Context, string, int) probe.Result {
 		return probe.Result{Status: "online", ConnectMS: 42, BannerBytes: 128}
@@ -64,9 +63,11 @@ func TestWorkerBacksOffRepeatedFailures(t *testing.T) {
 		return probe.Result{Status: "online"}
 	}
 	worker := probe.Worker{
-		DB: s.DB, Concurrency: 1, TelnetProbe: fake,
+		DB:           s.DB,
+		Concurrency:  1,
+		TelnetProbe:  fake,
 		BaseInterval: 30 * time.Minute,
-		Now: func() time.Time { return base.Add(2*time.Hour + 30*time.Minute) },
+		Now:          func() time.Time { return base.Add(2*time.Hour + 30*time.Minute) },
 	}
 	if _, err := worker.Run(context.Background()); err != nil {
 		t.Fatal(err)
@@ -103,9 +104,11 @@ func TestHealthyEndpointUsesBaseInterval(t *testing.T) {
 		return probe.Result{Status: "online"}
 	}
 	worker := probe.Worker{
-		DB: s.DB, Concurrency: 1, TelnetProbe: fake,
+		DB:           s.DB,
+		Concurrency:  1,
+		TelnetProbe:  fake,
 		BaseInterval: 30 * time.Minute,
-		Now: func() time.Time { return base.Add(31 * time.Minute) },
+		Now:          func() time.Time { return base.Add(31 * time.Minute) },
 	}
 	if _, err := worker.Run(context.Background()); err != nil {
 		t.Fatal(err)
