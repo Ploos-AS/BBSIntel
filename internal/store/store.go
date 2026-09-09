@@ -155,6 +155,11 @@ CREATE TABLE IF NOT EXISTS public_lifecycle_daily (
  disappeared_bbs INTEGER NOT NULL DEFAULT 0,
  returned_bbs INTEGER NOT NULL DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS public_runtime_snapshot (
+ metric TEXT PRIMARY KEY,
+ value INTEGER NOT NULL,
+ refreshed_at TEXT NOT NULL
+);
 CREATE INDEX IF NOT EXISTS idx_probe_endpoint_checked ON probe_result(endpoint_id, checked_at DESC);
 CREATE INDEX IF NOT EXISTS idx_probe_checked ON probe_result(checked_at);
 CREATE INDEX IF NOT EXISTS idx_change_event_occurred ON change_event(occurred_at DESC,id DESC);
@@ -162,6 +167,11 @@ CREATE INDEX IF NOT EXISTS idx_change_event_bbs ON change_event(bbs_id,occurred_
 CREATE INDEX IF NOT EXISTS idx_endpoint_hourly_bucket ON endpoint_hourly(bucket_start,endpoint_id);
 CREATE INDEX IF NOT EXISTS idx_endpoint_daily_bucket ON endpoint_daily(bucket_start,endpoint_id);
 CREATE INDEX IF NOT EXISTS idx_public_dimension ON public_dimension_snapshot(dimension,count DESC,value);
+CREATE INDEX IF NOT EXISTS idx_bbs_name_ci ON bbs(lower(name),id);
+CREATE INDEX IF NOT EXISTS idx_bbs_software_ci ON bbs(lower(trim(software)),id);
+CREATE INDEX IF NOT EXISTS idx_bbs_country_ci ON bbs(lower(trim(country)),id);
+CREATE INDEX IF NOT EXISTS idx_endpoint_bbs_protocol_ci ON endpoint(bbs_id,lower(trim(protocol)));
+CREATE INDEX IF NOT EXISTS idx_source_entry_bbs_source_active_ci ON source_entry(bbs_id,lower(trim(source)),active);
 `
 	if _, err := s.DB.ExecContext(ctx, schema); err != nil {
 		return fmt.Errorf("migrate: %w", err)
