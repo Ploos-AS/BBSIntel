@@ -14,6 +14,28 @@ func Import(ctx context.Context, db *sql.DB, adapter source.Adapter) (int, error
 	if err != nil {
 		return 0, err
 	}
+	if len(entries) == 0 {
+		return 0, fmt.Errorf("source %s returned an empty snapshot; refusing presence reconciliation", adapter.Name())
+	}
+
+	sourceName := strings.TrimSpace(adapter.Name())
+	if sourceName == "" {
+		return 0, fmt.Errorf("source adapter has empty name")
+	}
+	seen := make(map[string]struct{})
+	for i := range entries {
+		if strings.TrimSpace(entries[i].Source) == "" {
+			entries[i].Source = sourceName
+		}
+		if entries[i].Source != sourceName {
+			return 0, fmt.Errorf("source adapter %s returned entry for source %s", sourceName, entries[i].Source)
+		}
+		if strings.TrimSpace(entries[i].SourceKey) == "" {
+			return 0, fmt.Errorf("source %s returned entry with empty source key", sourceName)
+		}
+		seen[entries[i].SourceKey] = struct{}{}
+	}
+
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, err
@@ -26,6 +48,9 @@ func Import(ctx context.Context, db *sql.DB, adapter source.Adapter) (int, error
 		}
 		count++
 	}
+	if err := reconcilePresence(ctx, tx, sourceName, seen); err != nil {
+		return count, err
+	}
 	if err := tx.Commit(); err != nil {
 		return count, err
 	}
@@ -35,7 +60,8 @@ func Import(ctx context.Context, db *sql.DB, adapter source.Adapter) (int, error
 func upsert(ctx context.Context, tx *sql.Tx, e source.Entry) error {
 	e.Hostname = strings.ToLower(strings.TrimSpace(e.Hostname))
 	var bbsID int64
-	err := tx.QueryRowContext(ctx, `SELECT bbs_id FROM source_entry WHERE source=? AND source_key=?`, e.Source, e.SourceKey).Scan(&bbsID)
+	var sourceActive int
+	err := tx.QueryRowContext(ctx, `SELECT bbs_id,active FROM source_entry WHERE source=? AND source_key=?`, e.Source, e.SourceKey).Scan(&bbsID, &sourceActive)
 	if err != nil && err != sql.ErrNoRows {
 		return err
 	}
@@ -62,8 +88,8 @@ func upsert(ctx context.Context, tx *sql.Tx, e source.Entry) error {
 		}
 
 		_, err = tx.ExecContext(ctx, `INSERT INTO source_entry(
- bbs_id,source,source_key,source_url,reported_name,reported_software,reported_country,reported_description
-) VALUES(?,?,?,?,?,?,?,?)`, bbsID, e.Source, e.SourceKey, e.SourceURL, e.Name, e.Software, e.Country, e.Description)
+ bbs_id,source,source_key,source_url,reported_name,reported_software,reported_country,reported_description,active,missing_since
+) VALUES(?,?,?,?,?,?,?,?,1,'')`, bbsID, e.Source, e.SourceKey, e.SourceURL, e.Name, e.Software, e.Country, e.Description)
 		if err != nil {
 			return err
 		}
@@ -99,8 +125,14 @@ FROM source_entry WHERE source=? AND source_key=?`, e.Source, e.SourceKey).Scan(
 				}
 			}
 		}
+		if sourceActive == 0 {
+			if err := addEvent(ctx, tx, bbsID, 0, "source_returned", e.Source, "presence", "missing", "present", e.SourceKey); err != nil {
+				return err
+			}
+		}
 		_, err = tx.ExecContext(ctx, `UPDATE source_entry SET
- source_url=?,reported_name=?,reported_software=?,reported_country=?,reported_description=?,last_seen=CURRENT_TIMESTAMP
+ source_url=?,reported_name=?,reported_software=?,reported_country=?,reported_description=?,last_seen=CURRENT_TIMESTAMP,
+ active=1,missing_since=''
  WHERE source=? AND source_key=?`, e.SourceURL, e.Name, e.Software, e.Country, e.Description, e.Source, e.SourceKey)
 		if err != nil {
 			return err
@@ -121,6 +153,45 @@ FROM source_entry WHERE source=? AND source_key=?`, e.Source, e.SourceKey).Scan(
 	}
 	endpointID, _ := res.LastInsertId()
 	return addEvent(ctx, tx, bbsID, endpointID, "endpoint_added", e.Source, "endpoint", "", fmt.Sprintf("%s://%s:%d", e.Protocol, e.Hostname, e.Port), e.SourceKey)
+}
+
+func reconcilePresence(ctx context.Context, tx *sql.Tx, sourceName string, seen map[string]struct{}) error {
+	rows, err := tx.QueryContext(ctx, `SELECT bbs_id,source_key FROM source_entry WHERE source=? AND active=1`, sourceName)
+	if err != nil {
+		return err
+	}
+	type missingEntry struct {
+		bbsID     int64
+		sourceKey string
+	}
+	var missing []missingEntry
+	for rows.Next() {
+		var entry missingEntry
+		if err := rows.Scan(&entry.bbsID, &entry.sourceKey); err != nil {
+			rows.Close()
+			return err
+		}
+		if _, ok := seen[entry.sourceKey]; !ok {
+			missing = append(missing, entry)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+
+	for _, entry := range missing {
+		if _, err := tx.ExecContext(ctx, `UPDATE source_entry SET active=0,missing_since=CURRENT_TIMESTAMP WHERE source=? AND source_key=? AND active=1`, sourceName, entry.sourceKey); err != nil {
+			return err
+		}
+		if err := addEvent(ctx, tx, entry.bbsID, 0, "source_disappeared", sourceName, "presence", "present", "missing", entry.sourceKey); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func fillCanonicalMetadata(ctx context.Context, tx *sql.Tx, bbsID int64, e source.Entry) error {
