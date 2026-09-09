@@ -95,9 +95,9 @@ func (w Worker) Run(ctx context.Context) (int, error) {
 				result := telnetProbe(ctx, e.Hostname, e.Port)
 				_, err = w.DB.ExecContext(ctx, `
 INSERT INTO probe_result(
- endpoint_id,status,connect_ms,banner_bytes,banner_sha256,banner_preview,detected_software,error
-) VALUES(?,?,?,?,?,?,?,?)`, e.ID, result.Status, nullableConnectMS(result.ConnectMS), result.BannerBytes,
-					result.BannerSHA256, result.BannerPreview, result.DetectedSoftware, result.Error)
+ endpoint_id,status,connect_ms,banner_bytes,banner_sha256,banner_preview,detected_software,software_confidence,software_evidence,error
+) VALUES(?,?,?,?,?,?,?,?,?,?)`, e.ID, result.Status, nullableConnectMS(result.ConnectMS), result.BannerBytes,
+					result.BannerSHA256, result.BannerPreview, result.DetectedSoftware, result.SoftwareConfidence, result.SoftwareEvidence, result.Error)
 				if err != nil {
 					errCh <- fmt.Errorf("store probe result for endpoint %d: %w", e.ID, err)
 					continue
