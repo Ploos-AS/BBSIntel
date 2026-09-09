@@ -9,7 +9,9 @@ It aggregates public BBS directories, normalizes and deduplicates entries, probe
 - Go service
 - SQLite persistence
 - source-adapter model
-- Telnet/TCP endpoint probing
+- Telnet and SSH endpoint probing
+- Telnet banner cleanup and software fingerprinting
+- reported vs observed software provenance
 - status history
 - built-in scheduler
 - adaptive probe backoff
@@ -25,7 +27,7 @@ It aggregates public BBS directories, normalizes and deduplicates entries, probe
 - `offline` — connection failed or timed out
 - `dns_fail` — hostname could not be resolved
 
-Probing is intentionally passive: connect, read a bounded amount of data, then disconnect without logging in.
+Probing is intentionally passive. Telnet probes connect and read a bounded banner without logging in. SSH probes read only the server identification line (`SSH-2.0-...`) and disconnect without authentication or key exchange.
 
 ## Run locally
 
@@ -57,6 +59,18 @@ Healthy endpoints (`online` or `tcp_only`) use the configured probe interval. Re
 
 A healthy result immediately resets the endpoint to the normal cadence. The normal interval is taken from `BBSINTEL_PROBE_INTERVAL`, so custom probe cadences still work with backoff.
 
+## Software provenance
+
+Directory metadata remains separate from live observations:
+
+- `reported_software` — software claimed by a directory source
+- `observed_software` — software inferred from the latest live banner
+- `software_confidence` — confidence score for the observed fingerprint
+- `software_evidence` — banner token that produced the match
+- `software_mismatch` — true when reported and observed software disagree
+
+Observed values never overwrite source-reported values.
+
 ## One-shot commands
 
 Import BBS directory data:
@@ -64,6 +78,8 @@ Import BBS directory data:
 ```sh
 go run ./cmd/bbsintel import telnetbbsguide
 ```
+
+The Telnet BBS Guide adapter imports both advertised Telnet and SSH endpoints when present.
 
 Probe endpoints that are currently due:
 
@@ -82,9 +98,9 @@ Imports are idempotent for known source entries and endpoints. Probe runs append
 ## API
 
 - `GET /healthz`
-- `GET /api/v1/bbs` — BBS list including latest endpoint status
-- `GET /api/v1/bbs/{id}` — BBS details and latest status for each endpoint
-- `GET /api/v1/stats` — inventory, probe count, and latest-status totals
+- `GET /api/v1/bbs` — BBS list including latest endpoint status and software provenance
+- `GET /api/v1/bbs/{id}` — BBS details and latest status/fingerprint for each endpoint
+- `GET /api/v1/stats` — inventory, probe count, latest-status totals, and software mismatch count
 
 ## Container
 
@@ -96,7 +112,7 @@ Persistent data lives under `/data` in the container. Compose enables the built-
 
 ## Roadmap
 
-Planned next steps include richer Telnet negotiation, software fingerprinting, SSH/RLogin probes, uptime analytics, feeds, and a web UI.
+Planned next steps include RLogin/raw-TCP probes, uptime analytics, additional BBS directory adapters, feeds, and a web UI.
 
 ## License
 
