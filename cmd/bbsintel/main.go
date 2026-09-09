@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"log"
@@ -8,6 +9,8 @@ import (
 	"os"
 	"strings"
 
+	"github.com/Ploos-AS/BBSIntel/internal/ingest"
+	"github.com/Ploos-AS/BBSIntel/internal/source"
 	"github.com/Ploos-AS/BBSIntel/internal/store"
 )
 
@@ -19,6 +22,13 @@ func main() {
 	s, err := store.Open(dbPath)
 	if err != nil { log.Fatal(err) }
 	defer s.Close()
+
+	if len(os.Args) >= 3 && os.Args[1] == "import" && os.Args[2] == "telnetbbsguide" {
+		n, err := ingest.Import(context.Background(), s.DB, &source.TelnetBBSGuide{})
+		if err != nil { log.Fatal(err) }
+		log.Printf("imported %d Telnet BBS Guide entries", n)
+		return
+	}
 
 	srv := &server{db:s.DB}
 	mux := http.NewServeMux()
