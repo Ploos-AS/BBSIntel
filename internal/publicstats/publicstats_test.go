@@ -58,7 +58,7 @@ func TestRefreshDimensionsAndWholeBBSPresence(t *testing.T) {
 		t.Fatal(err)
 	}
 	var disappeared int
-	if err := s.DB.QueryRowContext(ctx, `SELECT COALESCE(disappeared_bbs,0) FROM public_lifecycle_daily WHERE day='2026-09-09'`).Scan(&disappeared); err != nil {
+	if err := s.DB.QueryRowContext(ctx, `SELECT COALESCE((SELECT disappeared_bbs FROM public_lifecycle_daily WHERE day='2026-09-09'),0)`).Scan(&disappeared); err != nil {
 		t.Fatal(err)
 	}
 	if disappeared != 0 {
