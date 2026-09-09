@@ -6,57 +6,45 @@ The application itself serves plain HTTP on port 8080. The reverse proxy should 
 
 BBSIntel deliberately does not trust or interpret `X-Forwarded-For`, `Forwarded`, or similar client-IP headers. This avoids accepting spoofed client identity when the service is accidentally exposed directly. Client-IP based controls belong at the trusted edge proxy.
 
-## Default Compose exposure
+## Production Compose with Caddy
 
-`compose.yaml` publishes the web process only on host loopback:
+The repository's `compose.yaml` uses Caddy as the only public entry point. `bbsintel-web` is exposed only on the private Compose `edge` network and has no host-published port. Caddy publishes TCP 80/443 and UDP 443 for automatic HTTPS and HTTP/3.
 
-```text
-127.0.0.1:8080 -> bbsintel-web:8080
+Set the public hostname and start the stack:
+
+```sh
+BBSINTEL_DOMAIN=bbs.example.org docker compose up -d --build
 ```
 
-A reverse proxy running on the host can therefore proxy to `127.0.0.1:8080` without exposing BBSIntel directly on the host's external interfaces.
+The hostname must resolve to the host and TCP ports 80/443 must be reachable for normal public ACME certificate issuance. Caddy stores certificate state in the persistent `caddy-data` volume.
 
-A reverse proxy running in Docker can instead share a Docker network with BBSIntel and proxy directly to `bbsintel-web:8080`; in that setup the host port publication may be removed entirely.
+The stack uses these named volumes:
 
-## Caddy example
+- `bbsintel-data` — shared local SQLite storage for web and worker
+- `caddy-data` — certificates and Caddy state
+- `caddy-config` — Caddy runtime configuration state
 
-```caddyfile
-bbs.example.org {
-    encode zstd gzip
+`bbsintel-web` and `bbsintel-worker` share only the local data volume; they run on separate Docker networks. The worker is not reachable from Caddy.
 
-    @metrics path /metrics
-    respond @metrics 404
+## Public Caddy policy
 
-    reverse_proxy 127.0.0.1:8080
-}
-```
+The checked-in `Caddyfile`:
 
-Use Caddy's rate-limit facilities or an upstream edge/WAF if per-client throttling is required. Keep `/metrics` on a private monitoring path/network rather than the public virtual host.
+- enables automatic HTTPS
+- enables zstd/gzip response compression
+- adds conservative security headers
+- removes Caddy's `Server` response header
+- performs active readiness checks against `/readyz`
+- writes JSON access logs to stdout
+- returns 404 for the public `/metrics` path
 
-## Nginx example
+BBSIntel itself remains responsible for API `Cache-Control` headers. Standard Caddy does not cache proxied responses by default, so the application's existing 30/60/300-second cache policies pass through unchanged. A CDN or caching proxy can be added later and should honor those upstream headers.
 
-```nginx
-limit_req_zone $binary_remote_addr zone=bbsintel_per_ip:10m rate=10r/s;
+`/metrics` is intentionally not exposed through the public Caddy virtual host. Prometheus should scrape `bbsintel-web:8080/metrics` from a trusted internal Docker network or another explicitly private monitoring path.
 
-server {
-    listen 443 ssl;
-    server_name bbs.example.org;
+## Standalone reverse proxy
 
-    location = /metrics {
-        return 404;
-    }
-
-    location / {
-        limit_req zone=bbsintel_per_ip burst=30 nodelay;
-        proxy_pass http://127.0.0.1:8080;
-        proxy_set_header Host $host;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    }
-}
-```
-
-The forwarded headers are useful to infrastructure and future application features, but BBSIntel does not currently use them to identify clients or make authorization/rate-limit decisions.
+If Caddy or another reverse proxy runs directly on the host rather than in this Compose stack, publish BBSIntel only on loopback and proxy to `127.0.0.1:8080`. Do not expose the application port directly to the Internet.
 
 ## Application overload protection
 
@@ -68,22 +56,27 @@ BBSINTEL_HTTP_MAX_INFLIGHT=64
 
 When the ceiling is reached, normal requests fail fast with HTTP `503 Service Unavailable` and `Retry-After: 1` instead of allowing an unbounded queue to build behind SQLite or expensive handlers. `/healthz` and `/readyz` remain exempt so orchestration and monitoring can still determine process/database health during saturation.
 
-This limiter is intentionally not a per-IP rate limiter. Per-IP logic in the application would require a trusted-proxy configuration and careful parsing of forwarded-address chains. Keeping that responsibility at the reverse proxy gives a smaller and safer trust boundary.
+This limiter is intentionally not a per-IP rate limiter. Per-IP logic in the application would require a trusted-proxy configuration and careful parsing of forwarded-address chains. Keep client-IP rate limiting at the trusted reverse proxy or upstream WAF/CDN.
 
-## Recommended public topology
+## Database boundary
+
+SQLite remains the recommended v0.1.0 database for a single-host deployment. Keep the database on local storage; do not place it on NFS or another network filesystem.
+
+A future multi-host or horizontally scaled deployment should move persistence to PostgreSQL rather than attempting to share SQLite across hosts. PostgreSQL is not required for the current one-host web/worker architecture.
+
+## Recommended topology
 
 ```text
 Internet
    |
    v
-Reverse proxy / TLS / edge rate limits
+Caddy :80/:443
+TLS / compression / edge policy
    |
    v
-BBSIntel web process :8080
+bbsintel-web :8080 (private Docker network)
    |
-   +---- SQLite (local host only)
+   +---- bbsintel-data (local SQLite volume)
    |
-BBSIntel worker process
+bbsintel-worker (separate Docker network)
 ```
-
-The SQLite database must remain on local storage shared by the web and worker processes on one host. Do not place the SQLite file on NFS or other network storage. A future multi-host/horizontally scaled deployment should move persistence to PostgreSQL rather than sharing SQLite across hosts.
