@@ -12,6 +12,7 @@ It aggregates public BBS directories, normalizes and deduplicates entries, probe
 - Telnet/TCP endpoint probing
 - status history
 - built-in scheduler
+- adaptive probe backoff
 - REST API
 - OCI image
 - Docker Compose
@@ -32,7 +33,7 @@ Probing is intentionally passive: connect, read a bounded amount of data, then d
 go run ./cmd/bbsintel
 ```
 
-The default server mode starts both the HTTP API and the scheduler. On startup the scheduler performs an import followed by a probe pass, then repeats imports every 24 hours and probes every 30 minutes.
+The default server mode starts both the HTTP API and the scheduler. On startup the scheduler performs an import followed by a probe pass, then repeats imports every 24 hours and considers endpoints for probing every 30 minutes.
 
 Defaults: listen on `:8080`, database at `./data/bbsintel.db`.
 
@@ -45,6 +46,17 @@ Environment variables:
 - `BBSINTEL_PROBE_INTERVAL` (default `30m`)
 - `BBSINTEL_PROBE_CONCURRENCY` (default `8`)
 
+## Adaptive probe cadence
+
+Healthy endpoints (`online` or `tcp_only`) use the configured probe interval. Repeated `offline` or `dns_fail` results progressively reduce probe frequency:
+
+- first failure: normal interval
+- second consecutive failure: `1h`
+- third consecutive failure: `6h`
+- fourth or later consecutive failure: `24h`
+
+A healthy result immediately resets the endpoint to the normal cadence. The normal interval is taken from `BBSINTEL_PROBE_INTERVAL`, so custom probe cadences still work with backoff.
+
 ## One-shot commands
 
 Import BBS directory data:
@@ -53,7 +65,7 @@ Import BBS directory data:
 go run ./cmd/bbsintel import telnetbbsguide
 ```
 
-Probe imported endpoints:
+Probe endpoints that are currently due:
 
 ```sh
 go run ./cmd/bbsintel probe
@@ -84,7 +96,7 @@ Persistent data lives under `/data` in the container. Compose enables the built-
 
 ## Roadmap
 
-Planned next steps include backoff for repeatedly unavailable systems, richer Telnet negotiation, software fingerprinting, SSH/RLogin probes, uptime analytics, feeds, and a web UI.
+Planned next steps include richer Telnet negotiation, software fingerprinting, SSH/RLogin probes, uptime analytics, feeds, and a web UI.
 
 ## License
 
