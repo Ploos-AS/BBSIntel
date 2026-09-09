@@ -8,9 +8,9 @@ import (
 func TestParseSynchronet(t *testing.T) {
 	html := `<table><tr><th>BBS</th><th>Since</th><th>Operators</th><th>Location</th><th>Terminal Services</th><th>Networks</th><th>Verification Results</th></tr>
 <tr><td>Example BBS<br>Example description</td><td>2024</td><td>Sysop</td><td>Oslo, Norway</td><td>
-example.org (telnet) ANSI<br>
-example.org:2222 (ssh) SSH
-example.org (rlogin)
+<a href="telnet://example.org">example.org</a> (telnet) ANSI<br>
+<a href="ssh://example.org:2222">example.org:2222</a> (ssh) SSH<br>
+<a href="rlogin://example.org">example.org</a> (rlogin)
 </td><td>DOVE-Net</td><td>2026-09-08 Synchronet BBS for Linux Version 3.22</td></tr></table>`
 	entries, err := parseSynchronet(strings.NewReader(html), "https://example.test/list")
 	if err != nil {
