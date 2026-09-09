@@ -71,6 +71,11 @@ func main() {
 		return
 	}
 
+	if len(os.Args) >= 2 && os.Args[1] == "maintenance" {
+		runMaintenance(s)
+		return
+	}
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -102,6 +107,7 @@ func main() {
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		jsonOut(w, map[string]string{"status": "ok"})
 	})
+	mux.HandleFunc("GET /readyz", srv.ready)
 	mux.HandleFunc("GET /api/v1/version", func(w http.ResponseWriter, r *http.Request) {
 		jsonOut(w, buildinfo.Current())
 	})
@@ -114,7 +120,15 @@ func main() {
 	registerEventRoutes(mux, srv)
 	registerAlertRoutes(mux, srv)
 
-	httpServer := &http.Server{Addr: listen, Handler: mux, ReadHeaderTimeout: 5 * time.Second}
+	httpServer := &http.Server{
+		Addr:              listen,
+		Handler:           mux,
+		ReadHeaderTimeout: envDuration("BBSINTEL_HTTP_READ_HEADER_TIMEOUT", 5*time.Second),
+		ReadTimeout:       envDuration("BBSINTEL_HTTP_READ_TIMEOUT", 15*time.Second),
+		WriteTimeout:      envDuration("BBSINTEL_HTTP_WRITE_TIMEOUT", 30*time.Second),
+		IdleTimeout:       envDuration("BBSINTEL_HTTP_IDLE_TIMEOUT", 60*time.Second),
+		MaxHeaderBytes:    envInt("BBSINTEL_HTTP_MAX_HEADER_BYTES", 1<<20),
+	}
 	go func() {
 		<-ctx.Done()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -126,6 +140,21 @@ func main() {
 	if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Fatal(err)
 	}
+}
+
+func (s *server) ready(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+	defer cancel()
+	if err := s.db.PingContext(ctx); err != nil {
+		http.Error(w, "database unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	var one int
+	if err := s.db.QueryRowContext(ctx, `SELECT 1`).Scan(&one); err != nil || one != 1 {
+		http.Error(w, "database unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	jsonOut(w, map[string]string{"status": "ready"})
 }
 
 func env(k, fallback string) string {
