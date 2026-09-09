@@ -34,7 +34,7 @@ func TestListProjectsCurrentAndDeduplicatedAlerts(t *testing.T) {
 	if _, err := s.DB.Exec(`INSERT INTO source_health(source,current_state,state_changed_at,last_error) VALUES('guide','stale','2026-09-09 02:00:00','old data')`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.DB.Exec(`INSERT INTO probe_result(endpoint_id,status,error) VALUES(?,?,?)`, endpointID, "offline", "connection refused"); err != nil {
+	if _, err := s.DB.Exec(`INSERT INTO probe_result(endpoint_id,checked_at,status,error) VALUES(?,'2026-09-09 02:15:00',?,?)`, endpointID, "offline", "connection refused"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.DB.Exec(`INSERT INTO change_event(bbs_id,endpoint_id,occurred_at,kind,field,old_value,new_value) VALUES(?,?,?, 'software_changed','observed_software','Mystic','Synchronet')`, bbsID, endpointID, "2026-09-09 02:10:00"); err != nil {
@@ -93,5 +93,41 @@ func TestListProjectsCurrentAndDeduplicatedAlerts(t *testing.T) {
 	}
 	if stats.ByCategory["software_change"] != 1 || stats.ByCategory["endpoint_status"] != 1 || stats.BySource["guide"] != 2 {
 		t.Fatalf("stats breakdown=%#v", stats)
+	}
+
+	page1, err := alerts.QueryPage(context.Background(), s.DB, alerts.Filter{Limit: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page1.Items) != 2 || page1.NextCursor == "" {
+		t.Fatalf("page1=%#v", page1)
+	}
+	page2, err := alerts.QueryPage(context.Background(), s.DB, alerts.Filter{Limit: 2, Cursor: page1.NextCursor})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page2.Items) != 2 || page2.NextCursor != "" {
+		t.Fatalf("page2=%#v", page2)
+	}
+	seen := map[string]bool{}
+	for _, alert := range page1.Items {
+		seen[alert.Key] = true
+	}
+	for _, alert := range page2.Items {
+		if seen[alert.Key] {
+			t.Fatalf("duplicate alert across pages: %s", alert.Key)
+		}
+	}
+
+	recent, err := alerts.Query(context.Background(), s.DB, alerts.Filter{Since: "2026-09-09 02:05:00"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(recent) != 2 {
+		t.Fatalf("recent alerts=%#v, want endpoint and software change", recent)
+	}
+
+	if _, err := alerts.QueryPage(context.Background(), s.DB, alerts.Filter{Cursor: "not-a-cursor"}); err == nil {
+		t.Fatal("invalid cursor unexpectedly accepted")
 	}
 }
