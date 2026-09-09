@@ -1,6 +1,9 @@
 name: Live qualification
 
 on:
+  push:
+    paths:
+      - '.github/workflows/qualification.yml'
   workflow_dispatch:
     inputs:
       probe_limit:
