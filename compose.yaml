@@ -3,6 +3,11 @@ services:
     build: .
     ports:
       - "8080:8080"
+    environment:
+      BBSINTEL_SCHEDULER_ENABLED: "true"
+      BBSINTEL_IMPORT_INTERVAL: "24h"
+      BBSINTEL_PROBE_INTERVAL: "30m"
+      BBSINTEL_PROBE_CONCURRENCY: "8"
     volumes:
       - ./data:/data
     restart: unless-stopped
