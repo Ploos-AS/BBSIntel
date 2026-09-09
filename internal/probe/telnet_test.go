@@ -9,8 +9,15 @@ func TestCleanTelnetBannerAndDetectSoftware(t *testing.T) {
 	if preview != "Synchronet" {
 		t.Fatalf("preview=%q, want Synchronet", preview)
 	}
-	if got := detectSoftware(preview); got != "Synchronet" {
-		t.Fatalf("detected software=%q, want Synchronet", got)
+	software, confidence, evidence := detectSoftware(preview)
+	if software != "Synchronet" {
+		t.Fatalf("detected software=%q, want Synchronet", software)
+	}
+	if confidence < 0.9 {
+		t.Fatalf("confidence=%f, want >=0.9", confidence)
+	}
+	if evidence != "synchronet" {
+		t.Fatalf("evidence=%q, want synchronet", evidence)
 	}
 }
 
@@ -20,7 +27,11 @@ func TestCleanTelnetBannerSkipsSubnegotiation(t *testing.T) {
 	if preview != "Mystic BBS" {
 		t.Fatalf("preview=%q, want Mystic BBS", preview)
 	}
-	if got := detectSoftware(preview); got != "Mystic" {
-		t.Fatalf("detected software=%q, want Mystic", got)
+	software, confidence, evidence := detectSoftware(preview)
+	if software != "Mystic" {
+		t.Fatalf("detected software=%q, want Mystic", software)
+	}
+	if confidence != 0.99 || evidence != "mystic bbs" {
+		t.Fatalf("fingerprint=(%f,%q), want (0.99,mystic bbs)", confidence, evidence)
 	}
 }
