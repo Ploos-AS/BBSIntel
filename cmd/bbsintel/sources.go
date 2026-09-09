@@ -15,6 +15,8 @@ type sourceView struct {
 	ReportedCountry     string `json:"reported_country"`
 	ReportedDescription string `json:"reported_description"`
 	LastSeen            string `json:"last_seen"`
+	Active              bool   `json:"active"`
+	MissingSince        string `json:"missing_since,omitempty"`
 }
 
 func registerSourceRoutes(mux *http.ServeMux, srv *server) {
@@ -34,8 +36,8 @@ func (s *server) getBBSSources(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rows, err := s.db.QueryContext(r.Context(), `
-SELECT source,source_key,source_url,reported_name,reported_software,reported_country,reported_description,last_seen
-FROM source_entry WHERE bbs_id=? ORDER BY source,source_key`, id)
+SELECT source,source_key,source_url,reported_name,reported_software,reported_country,reported_description,last_seen,active,missing_since
+FROM source_entry WHERE bbs_id=? ORDER BY active DESC,source,source_key`, id)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -45,10 +47,12 @@ FROM source_entry WHERE bbs_id=? ORDER BY source,source_key`, id)
 	out := []sourceView{}
 	for rows.Next() {
 		var v sourceView
-		if err := rows.Scan(&v.Source, &v.SourceKey, &v.SourceURL, &v.ReportedName, &v.ReportedSoftware, &v.ReportedCountry, &v.ReportedDescription, &v.LastSeen); err != nil {
+		var active int
+		if err := rows.Scan(&v.Source, &v.SourceKey, &v.SourceURL, &v.ReportedName, &v.ReportedSoftware, &v.ReportedCountry, &v.ReportedDescription, &v.LastSeen, &active, &v.MissingSince); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+		v.Active = active != 0
 		out = append(out, v)
 	}
 	jsonOut(w, out)
