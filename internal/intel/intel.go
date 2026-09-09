@@ -9,19 +9,19 @@ import (
 )
 
 type Summary struct {
-	SourceCount               int      `json:"source_count"`
-	NameConflict              bool     `json:"name_conflict"`
-	SoftwareConflict          bool     `json:"software_conflict"`
-	CountryConflict           bool     `json:"country_conflict"`
-	DescriptionConflict       bool     `json:"description_conflict"`
-	ConflictCount             int      `json:"conflict_count"`
-	SourceAgreementPct        float64  `json:"source_agreement_pct"`
-	Names                     []string `json:"names"`
-	ReportedSoftware          []string `json:"reported_software"`
-	Countries                 []string `json:"countries"`
-	ObservedSoftware          string   `json:"observed_software"`
-	ObservedSoftwareConfidence float64 `json:"observed_software_confidence"`
-	ObservedMatchesSource     bool     `json:"observed_matches_source"`
+	SourceCount                int      `json:"source_count"`
+	NameConflict               bool     `json:"name_conflict"`
+	SoftwareConflict           bool     `json:"software_conflict"`
+	CountryConflict            bool     `json:"country_conflict"`
+	DescriptionConflict        bool     `json:"description_conflict"`
+	ConflictCount              int      `json:"conflict_count"`
+	SourceAgreementPct         float64  `json:"source_agreement_pct"`
+	Names                      []string `json:"names"`
+	ReportedSoftware           []string `json:"reported_software"`
+	Countries                  []string `json:"countries"`
+	ObservedSoftware           string   `json:"observed_software"`
+	ObservedSoftwareConfidence float64  `json:"observed_software_confidence"`
+	ObservedMatchesSource      bool     `json:"observed_matches_source"`
 }
 
 type sourceRow struct {
