@@ -14,6 +14,7 @@ It aggregates public BBS directories, normalizes and deduplicates entries, probe
 - Telnet and SSH endpoint probing
 - Telnet banner cleanup and software fingerprinting
 - full per-source metadata provenance
+- source disagreement intelligence
 - reported vs observed software provenance
 - status history
 - sample-based uptime analytics
@@ -50,6 +51,22 @@ Canonical BBS metadata is kept separately from source-specific claims. Each `sou
 Canonical values on the BBS record are filled conservatively and are not overwritten simply because another source imports later. All source claims remain queryable through `GET /api/v1/bbs/{id}/sources`.
 
 This makes disagreements explicit. For example, one directory may report Mystic while another reports Synchronet, and live probing may independently observe Synchronet. BBSIntel preserves all three pieces of evidence.
+
+## Source intelligence
+
+BBSIntel derives an intelligence summary from provenance instead of storing a second competing truth. `GET /api/v1/bbs/{id}/intelligence` exposes:
+
+- `source_count`
+- `name_conflict`, `software_conflict`, `country_conflict`, and `description_conflict`
+- `conflict_count`
+- normalized distinct names, reported software values, and countries
+- `source_agreement_pct` across non-empty name/software/country claims
+- latest observed software and fingerprint confidence
+- whether the observed software matches at least one directory source
+
+The global `GET /api/v1/intelligence/stats` endpoint reports counts of multi-source BBS identities and conflicts by metadata field.
+
+`source_agreement_pct` is an agreement metric, not a claim that a particular source is correct. Live observations remain separate evidence.
 
 ## Status model
 
@@ -145,6 +162,8 @@ The scheduler imports all configured directory adapters, including Synchronet. I
 - `GET /api/v1/bbs` — BBS list including latest endpoint status and software provenance
 - `GET /api/v1/bbs/{id}` — BBS details and latest status/fingerprint for each endpoint
 - `GET /api/v1/bbs/{id}/sources` — source-specific names, software, country, description, URLs, and last-seen timestamps
+- `GET /api/v1/bbs/{id}/intelligence` — source disagreement summary and comparison with observed software
+- `GET /api/v1/intelligence/stats` — aggregate counts of multi-source identities and metadata conflicts
 - `GET /api/v1/bbs/{id}/analytics` — first/last observations, status changes, and 24h/7d/30d sample-based uptime
 - `GET /api/v1/bbs/{id}/history?limit=200` — newest probe history across the BBS endpoints; limit is capped at 1000
 - `GET /api/v1/stats` — inventory, probe count, latest-status totals, and software mismatch count
