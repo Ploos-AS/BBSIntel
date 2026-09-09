@@ -20,23 +20,73 @@ type Alert struct {
 	Detail     string `json:"detail,omitempty"`
 }
 
+type Filter struct {
+	Limit           int
+	MinimumSeverity string
+	Category        string
+	Source          string
+	BBSID           int64
+}
+
+type Stats struct {
+	Total      int            `json:"total"`
+	BySeverity map[string]int `json:"by_severity"`
+	ByCategory map[string]int `json:"by_category"`
+	BySource   map[string]int `json:"by_source"`
+}
+
 var severityRank = map[string]int{"info": 0, "warning": 1, "high": 2, "critical": 3}
 
 func List(ctx context.Context, db *sql.DB, limit int, minimumSeverity string) ([]Alert, error) {
-	if db == nil {
-		return nil, fmt.Errorf("alerts: nil database")
+	return Query(ctx, db, Filter{Limit: limit, MinimumSeverity: minimumSeverity})
+}
+
+func Query(ctx context.Context, db *sql.DB, filter Filter) ([]Alert, error) {
+	all, err := collect(ctx, db)
+	if err != nil {
+		return nil, err
 	}
+	filtered := applyFilter(all, filter)
+	limit := filter.Limit
 	if limit <= 0 {
 		limit = 200
 	}
 	if limit > 1000 {
 		limit = 1000
 	}
-	minRank, ok := severityRank[strings.ToLower(strings.TrimSpace(minimumSeverity))]
-	if !ok {
-		minRank = 0
+	if len(filtered) > limit {
+		filtered = filtered[:limit]
 	}
+	return filtered, nil
+}
 
+func Summarize(ctx context.Context, db *sql.DB, filter Filter) (Stats, error) {
+	all, err := collect(ctx, db)
+	if err != nil {
+		return Stats{}, err
+	}
+	filter.Limit = 0
+	filtered := applyFilter(all, filter)
+	out := Stats{
+		Total:      len(filtered),
+		BySeverity: map[string]int{"info": 0, "warning": 0, "high": 0, "critical": 0},
+		ByCategory: map[string]int{},
+		BySource:   map[string]int{},
+	}
+	for _, alert := range filtered {
+		out.BySeverity[alert.Severity]++
+		out.ByCategory[alert.Category]++
+		if alert.Source != "" {
+			out.BySource[alert.Source]++
+		}
+	}
+	return out, nil
+}
+
+func collect(ctx context.Context, db *sql.DB) ([]Alert, error) {
+	if db == nil {
+		return nil, fmt.Errorf("alerts: nil database")
+	}
 	var out []Alert
 	if err := appendSourceHealth(ctx, db, &out); err != nil {
 		return nil, err
@@ -50,27 +100,43 @@ func List(ctx context.Context, db *sql.DB, limit int, minimumSeverity string) ([
 	if err := appendSoftwareChanges(ctx, db, &out); err != nil {
 		return nil, err
 	}
-
-	filtered := out[:0]
-	for _, alert := range out {
-		if severityRank[alert.Severity] >= minRank {
-			filtered = append(filtered, alert)
-		}
-	}
-	sort.SliceStable(filtered, func(i, j int) bool {
-		ri, rj := severityRank[filtered[i].Severity], severityRank[filtered[j].Severity]
+	sort.SliceStable(out, func(i, j int) bool {
+		ri, rj := severityRank[out[i].Severity], severityRank[out[j].Severity]
 		if ri != rj {
 			return ri > rj
 		}
-		if filtered[i].OccurredAt != filtered[j].OccurredAt {
-			return filtered[i].OccurredAt > filtered[j].OccurredAt
+		if out[i].OccurredAt != out[j].OccurredAt {
+			return out[i].OccurredAt > out[j].OccurredAt
 		}
-		return filtered[i].Key < filtered[j].Key
+		return out[i].Key < out[j].Key
 	})
-	if len(filtered) > limit {
-		filtered = filtered[:limit]
+	return out, nil
+}
+
+func applyFilter(in []Alert, filter Filter) []Alert {
+	minRank, ok := severityRank[strings.ToLower(strings.TrimSpace(filter.MinimumSeverity))]
+	if !ok {
+		minRank = 0
 	}
-	return filtered, nil
+	category := strings.ToLower(strings.TrimSpace(filter.Category))
+	source := strings.ToLower(strings.TrimSpace(filter.Source))
+	out := make([]Alert, 0, len(in))
+	for _, alert := range in {
+		if severityRank[alert.Severity] < minRank {
+			continue
+		}
+		if category != "" && strings.ToLower(alert.Category) != category {
+			continue
+		}
+		if source != "" && strings.ToLower(alert.Source) != source {
+			continue
+		}
+		if filter.BBSID > 0 && alert.BBSID != filter.BBSID {
+			continue
+		}
+		out = append(out, alert)
+	}
+	return out
 }
 
 func appendSourceHealth(ctx context.Context, db *sql.DB, out *[]Alert) error {
