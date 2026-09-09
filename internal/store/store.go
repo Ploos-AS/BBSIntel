@@ -64,6 +64,10 @@ CREATE TABLE IF NOT EXISTS source_entry (
  source TEXT NOT NULL,
  source_key TEXT NOT NULL,
  source_url TEXT NOT NULL DEFAULT '',
+ reported_name TEXT NOT NULL DEFAULT '',
+ reported_software TEXT NOT NULL DEFAULT '',
+ reported_country TEXT NOT NULL DEFAULT '',
+ reported_description TEXT NOT NULL DEFAULT '',
  last_seen TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
  UNIQUE(source, source_key)
 );
@@ -92,9 +96,13 @@ CREATE INDEX IF NOT EXISTS idx_probe_endpoint_checked ON probe_result(endpoint_i
 		`ALTER TABLE probe_result ADD COLUMN detected_software TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE probe_result ADD COLUMN software_confidence REAL NOT NULL DEFAULT 0`,
 		`ALTER TABLE probe_result ADD COLUMN software_evidence TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE source_entry ADD COLUMN reported_name TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE source_entry ADD COLUMN reported_software TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE source_entry ADD COLUMN reported_country TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE source_entry ADD COLUMN reported_description TEXT NOT NULL DEFAULT ''`,
 	} {
 		if _, err := s.DB.ExecContext(ctx, stmt); err != nil && !isDuplicateColumn(err) {
-			return fmt.Errorf("migrate probe_result: %w", err)
+			return fmt.Errorf("migrate: %w", err)
 		}
 	}
 	return nil
