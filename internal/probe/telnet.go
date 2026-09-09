@@ -10,10 +10,10 @@ import (
 )
 
 type Result struct {
-	Status string `json:"status"`
-	ConnectMS int64 `json:"connect_ms"`
-	BannerBytes int `json:"banner_bytes"`
-	Error string `json:"error,omitempty"`
+	Status      string `json:"status"`
+	ConnectMS   int64  `json:"connect_ms"`
+	BannerBytes int    `json:"banner_bytes"`
+	Error       string `json:"error,omitempty"`
 }
 
 func Telnet(ctx context.Context, hostname string, port int) Result {
@@ -23,7 +23,9 @@ func Telnet(ctx context.Context, hostname string, port int) Result {
 	if err != nil {
 		status := "offline"
 		var dnsErr *net.DNSError
-		if errors.As(err, &dnsErr) { status = "dns_fail" }
+		if errors.As(err, &dnsErr) {
+			status = "dns_fail"
+		}
 		return Result{Status: status, Error: err.Error()}
 	}
 	defer conn.Close()
@@ -31,10 +33,14 @@ func Telnet(ctx context.Context, hostname string, port int) Result {
 	_ = conn.SetReadDeadline(time.Now().Add(3 * time.Second))
 	buf := make([]byte, 8192)
 	n, err := conn.Read(buf)
-	if n > 0 { return Result{Status:"online", ConnectMS:connectMS, BannerBytes:n} }
-	if err != nil && !errors.Is(err, io.EOF) {
-		if ne, ok := err.(net.Error); ok && ne.Timeout() { return Result{Status:"tcp_only", ConnectMS:connectMS} }
-		return Result{Status:"tcp_only", ConnectMS:connectMS, Error:err.Error()}
+	if n > 0 {
+		return Result{Status: "online", ConnectMS: connectMS, BannerBytes: n}
 	}
-	return Result{Status:"tcp_only", ConnectMS:connectMS}
+	if err != nil && !errors.Is(err, io.EOF) {
+		if ne, ok := err.(net.Error); ok && ne.Timeout() {
+			return Result{Status: "tcp_only", ConnectMS: connectMS}
+		}
+		return Result{Status: "tcp_only", ConnectMS: connectMS, Error: err.Error()}
+	}
+	return Result{Status: "tcp_only", ConnectMS: connectMS}
 }
