@@ -5,6 +5,11 @@ on:
     tags:
       - 'v*'
   workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to build
+        required: false
+        type: string
 
 permissions:
   contents: write
@@ -12,12 +17,16 @@ permissions:
 
 env:
   IMAGE_GHCR: ghcr.io/ploos-as/bbsintel
+  RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
 
 jobs:
   validate:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+          fetch-depth: 0
       - uses: actions/setup-go@v5
         with:
           go-version: '1.24.x'
@@ -25,7 +34,9 @@ jobs:
         shell: bash
         run: |
           expected="v$(tr -d '[:space:]' < VERSION)"
-          test "${GITHUB_REF_NAME}" = "$expected"
+          test "${RELEASE_TAG}" = "$expected"
+          git rev-parse "refs/tags/${RELEASE_TAG}" >/dev/null
+          test "$(git rev-parse HEAD)" = "$(git rev-list -n1 "${RELEASE_TAG}")"
       - run: go mod tidy && git diff --exit-code -- go.mod go.sum
       - run: test -z "$(gofmt -l .)"
       - run: go vet ./...
@@ -35,6 +46,7 @@ jobs:
     needs: validate
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         include:
           - goos: linux
@@ -43,6 +55,9 @@ jobs:
             goarch: arm64
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+          fetch-depth: 0
       - uses: actions/setup-go@v5
         with:
           go-version: '1.24.x'
@@ -55,11 +70,16 @@ jobs:
         run: |
           mkdir -p dist
           build_date="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          version="${GITHUB_REF_NAME#v}"
-          ldflags="-s -w -X github.com/Ploos-AS/BBSIntel/internal/buildinfo.Version=${version} -X github.com/Ploos-AS/BBSIntel/internal/buildinfo.Commit=${GITHUB_SHA} -X github.com/Ploos-AS/BBSIntel/internal/buildinfo.Date=${build_date}"
-          go build -trimpath -ldflags="$ldflags" -o "dist/bbsintel-${GOOS}-${GOARCH}" ./cmd/bbsintel
-          "dist/bbsintel-${GOOS}-${GOARCH}" --version
-          sha256sum "dist/bbsintel-${GOOS}-${GOARCH}" > "dist/bbsintel-${GOOS}-${GOARCH}.sha256"
+          version="${RELEASE_TAG#v}"
+          commit="$(git rev-parse HEAD)"
+          ldflags="-s -w -X github.com/Ploos-AS/BBSIntel/internal/buildinfo.Version=${version} -X github.com/Ploos-AS/BBSIntel/internal/buildinfo.Commit=${commit} -X github.com/Ploos-AS/BBSIntel/internal/buildinfo.Date=${build_date}"
+          output="dist/bbsintel-${GOOS}-${GOARCH}"
+          go build -trimpath -ldflags="$ldflags" -o "$output" ./cmd/bbsintel
+          go version -m "$output"
+          if [ "$GOARCH" = "amd64" ]; then
+            "$output" --version
+          fi
+          sha256sum "$output" > "${output}.sha256"
       - uses: actions/upload-artifact@v4
         with:
           name: binary-${{ matrix.goos }}-${{ matrix.goarch }}
@@ -74,6 +94,9 @@ jobs:
       DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+          fetch-depth: 0
       - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
       - name: Login to GHCR
@@ -92,10 +115,12 @@ jobs:
         id: meta
         shell: bash
         run: |
-          version="${GITHUB_REF_NAME#v}"
+          version="${RELEASE_TAG#v}"
           build_date="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          commit="$(git rev-parse HEAD)"
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "build_date=$build_date" >> "$GITHUB_OUTPUT"
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
       - name: Publish GHCR multi-arch image
         uses: docker/build-push-action@v6
         with:
@@ -107,7 +132,7 @@ jobs:
             ${{ env.IMAGE_GHCR }}:latest
           build-args: |
             VERSION=${{ steps.meta.outputs.version }}
-            VCS_REF=${{ github.sha }}
+            VCS_REF=${{ steps.meta.outputs.commit }}
             BUILD_DATE=${{ steps.meta.outputs.build_date }}
       - name: Publish Docker Hub multi-arch image
         if: env.DOCKERHUB_USERNAME != '' && env.DOCKERHUB_TOKEN != ''
@@ -121,7 +146,7 @@ jobs:
             ${{ env.DOCKERHUB_USERNAME }}/bbsintel:latest
           build-args: |
             VERSION=${{ steps.meta.outputs.version }}
-            VCS_REF=${{ github.sha }}
+            VCS_REF=${{ steps.meta.outputs.commit }}
             BUILD_DATE=${{ steps.meta.outputs.build_date }}
 
   github-release:
@@ -129,6 +154,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
       - uses: actions/download-artifact@v4
         with:
           pattern: binary-*
@@ -139,7 +166,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
         run: |
-          gh release create "${GITHUB_REF_NAME}" dist/* \
-            --title "BBSIntel ${GITHUB_REF_NAME}" \
+          gh release create "${RELEASE_TAG}" dist/* \
+            --title "BBSIntel ${RELEASE_TAG}" \
             --notes-file CHANGELOG.md \
             --verify-tag
