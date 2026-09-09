@@ -4,17 +4,19 @@ BBSIntel is a self-hosted BBS discovery, verification, monitoring, and intellige
 
 It aggregates public BBS directories, normalizes and deduplicates entries, probes endpoints, stores availability history, and exposes the resulting data through an HTTP API.
 
-## M0 scope
+## v0.1.0 scope
 
 - Go service
 - SQLite persistence
 - source-adapter model
-- multiple public BBS directory sources
+- Telnet BBS Guide and Synchronet directory sources
 - cross-source endpoint deduplication
 - Telnet and SSH endpoint probing
 - Telnet banner cleanup and software fingerprinting
 - full per-source metadata provenance
 - source disagreement intelligence
+- source health and change events
+- derived alerts with filtering, statistics, `since`, and cursor pagination
 - reported vs observed software provenance
 - status history
 - sample-based uptime analytics
@@ -23,7 +25,7 @@ It aggregates public BBS directories, normalizes and deduplicates entries, probe
 - REST API
 - OCI image
 - Docker Compose
-- GitHub Actions CI
+- GitHub Actions CI, live qualification, and release workflow
 
 ## Directory sources
 
@@ -47,6 +49,7 @@ Canonical BBS metadata is kept separately from source-specific claims. Each `sou
 - reported country
 - reported description
 - last-seen timestamp
+- active/missing state
 
 Canonical values on the BBS record are filled conservatively and are not overwritten simply because another source imports later. All source claims remain queryable through `GET /api/v1/bbs/{id}/sources`.
 
@@ -70,12 +73,13 @@ The global `GET /api/v1/intelligence/stats` endpoint reports counts of multi-sou
 
 ## Status model
 
-- `online` — connection succeeded and application data was observed
+- `online` — connection succeeded and application/banner data was observed
+- `telnet_only` — a Telnet endpoint responded with negotiation bytes but no cleaned application banner was observed
 - `tcp_only` — TCP connection succeeded but no application data was observed
 - `offline` — connection failed or timed out
 - `dns_fail` — hostname could not be resolved
 
-Probing is intentionally passive. Telnet probes connect and read a bounded banner without logging in. SSH probes read only the server identification line (`SSH-2.0-...`) and disconnect without authentication or key exchange.
+`online`, `telnet_only`, and `tcp_only` are treated as healthy connectivity states for probe cadence. Probing is intentionally passive. Telnet probes connect and read a bounded banner without logging in or replying to Telnet negotiation. SSH probes read a bounded server identification stream and disconnect without authentication or key exchange.
 
 ## Run locally
 
@@ -98,14 +102,14 @@ Environment variables:
 
 ## Adaptive probe cadence
 
-Healthy endpoints (`online` or `tcp_only`) use the configured probe interval. Repeated `offline` or `dns_fail` results progressively reduce probe frequency:
+Healthy endpoints (`online`, `telnet_only`, or `tcp_only`) use the configured probe interval. Repeated `offline` or `dns_fail` results progressively reduce probe frequency:
 
 - first failure: normal interval
-- second consecutive failure: `1h`
-- third consecutive failure: `6h`
-- fourth or later consecutive failure: `24h`
+- second consecutive failure: at least `1h`
+- third consecutive failure: at least `6h`
+- fourth or later consecutive failure: at least `24h`
 
-A healthy result immediately resets the endpoint to the normal cadence. The normal interval is taken from `BBSINTEL_PROBE_INTERVAL`, so custom probe cadences still work with backoff.
+Backoff never shortens a custom base probe interval. A healthy result immediately resets the endpoint to the normal cadence.
 
 ## Software provenance
 
@@ -142,6 +146,12 @@ Import Telnet BBS Guide data:
 go run ./cmd/bbsintel import telnetbbsguide
 ```
 
+Import the Synchronet directory:
+
+```sh
+go run ./cmd/bbsintel import synchronet
+```
+
 Probe endpoints that are currently due:
 
 ```sh
@@ -154,18 +164,31 @@ Run only the scheduler without the HTTP API:
 go run ./cmd/bbsintel scheduler
 ```
 
-The scheduler imports all configured directory adapters, including Synchronet. Imports are idempotent for known source entries and endpoints. Probe runs append to `probe_result`, building availability history instead of overwriting previous checks.
+Show build/release information:
+
+```sh
+go run ./cmd/bbsintel --version
+# or
+go run ./cmd/bbsintel version
+```
+
+The scheduler imports all configured directory adapters. Imports are idempotent for known source entries and endpoints. Probe runs append to `probe_result`, building availability history instead of overwriting previous checks.
 
 ## API
 
 - `GET /healthz`
+- `GET /api/v1/version` — version, commit, and build date
 - `GET /api/v1/bbs` — BBS list including latest endpoint status and software provenance
 - `GET /api/v1/bbs/{id}` — BBS details and latest status/fingerprint for each endpoint
-- `GET /api/v1/bbs/{id}/sources` — source-specific names, software, country, description, URLs, and last-seen timestamps
+- `GET /api/v1/bbs/{id}/sources` — source-specific metadata and presence state
 - `GET /api/v1/bbs/{id}/intelligence` — source disagreement summary and comparison with observed software
 - `GET /api/v1/intelligence/stats` — aggregate counts of multi-source identities and metadata conflicts
 - `GET /api/v1/bbs/{id}/analytics` — first/last observations, status changes, and 24h/7d/30d sample-based uptime
 - `GET /api/v1/bbs/{id}/history?limit=200` — newest probe history across the BBS endpoints; limit is capped at 1000
+- `GET /api/v1/events` and `GET /api/v1/bbs/{id}/events` — change feeds with `since` and opaque cursor pagination
+- `GET /api/v1/alerts` — deduplicated current alerts with severity/category/source/BBS filters, `since`, and cursor pagination
+- `GET /api/v1/alerts/stats` — alert totals grouped by severity, category, and source
+- `GET /api/v1/sources/health` — import telemetry, live freshness classification, and persisted scheduler-observed state
 - `GET /api/v1/stats` — inventory, probe count, latest-status totals, and software mismatch count
 
 ## Container
@@ -176,9 +199,15 @@ docker compose up --build
 
 Persistent data lives under `/data` in the container. Compose enables the built-in scheduler with the default 24-hour import and 30-minute probe cadence.
 
+Release tags publish a multi-architecture image for `linux/amd64` and `linux/arm64` to `ghcr.io/ploos-as/bbsintel`. When `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` repository secrets are configured, the release workflow also publishes `${DOCKERHUB_USERNAME}/bbsintel` to Docker Hub.
+
+## v0.1.0 qualification
+
+The pre-release live qualification imported 909 Telnet BBS Guide entries and 356 Synchronet entries, producing 1,026 BBS identities and 1,132 endpoints after deduplication. A bounded 20-endpoint passive probe sample and API smoke suite also passed. See `docs/M1_10_PRE_RELEASE_QUALIFICATION.md` for the recorded qualification results.
+
 ## Roadmap
 
-Planned next steps include RLogin/raw-TCP probes, additional BBS directory adapters, feeds, and a web UI.
+Planned next steps include additional directory adapters, RLogin/raw-TCP support, richer feeds, and a web UI.
 
 ## License
 
