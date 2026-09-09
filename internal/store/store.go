@@ -102,7 +102,6 @@ CREATE TABLE IF NOT EXISTS change_event (
 CREATE INDEX IF NOT EXISTS idx_probe_endpoint_checked ON probe_result(endpoint_id, checked_at DESC);
 CREATE INDEX IF NOT EXISTS idx_change_event_occurred ON change_event(occurred_at DESC,id DESC);
 CREATE INDEX IF NOT EXISTS idx_change_event_bbs ON change_event(bbs_id,occurred_at DESC,id DESC);
-CREATE INDEX IF NOT EXISTS idx_source_entry_presence ON source_entry(source,active,last_seen);
 `
 	if _, err := s.DB.ExecContext(ctx, schema); err != nil {
 		return fmt.Errorf("migrate: %w", err)
