@@ -10,14 +10,23 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-type Store struct { DB *sql.DB }
+type Store struct {
+	DB *sql.DB
+}
 
 func Open(path string) (*Store, error) {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil { return nil, err }
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return nil, err
+	}
 	db, err := sql.Open("sqlite", path)
-	if err != nil { return nil, err }
+	if err != nil {
+		return nil, err
+	}
 	s := &Store{DB: db}
-	if err := s.migrate(context.Background()); err != nil { db.Close(); return nil, err }
+	if err := s.migrate(context.Background()); err != nil {
+		db.Close()
+		return nil, err
+	}
 	return s, nil
 }
 
@@ -63,6 +72,8 @@ CREATE TABLE IF NOT EXISTS probe_result (
 );
 CREATE INDEX IF NOT EXISTS idx_probe_endpoint_checked ON probe_result(endpoint_id, checked_at DESC);
 `
-	if _, err := s.DB.ExecContext(ctx, schema); err != nil { return fmt.Errorf("migrate: %w", err) }
+	if _, err := s.DB.ExecContext(ctx, schema); err != nil {
+		return fmt.Errorf("migrate: %w", err)
+	}
 	return nil
 }
