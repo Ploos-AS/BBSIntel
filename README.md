@@ -11,6 +11,7 @@ It aggregates public BBS directories, normalizes and deduplicates entries, probe
 - source-adapter model
 - Telnet/TCP endpoint probing
 - status history
+- built-in scheduler
 - REST API
 - OCI image
 - Docker Compose
@@ -31,29 +32,40 @@ Probing is intentionally passive: connect, read a bounded amount of data, then d
 go run ./cmd/bbsintel
 ```
 
+The default server mode starts both the HTTP API and the scheduler. On startup the scheduler performs an import followed by a probe pass, then repeats imports every 24 hours and probes every 30 minutes.
+
 Defaults: listen on `:8080`, database at `./data/bbsintel.db`.
 
 Environment variables:
 
 - `BBSINTEL_LISTEN`
 - `BBSINTEL_DB`
+- `BBSINTEL_SCHEDULER_ENABLED` (default `true`)
+- `BBSINTEL_IMPORT_INTERVAL` (default `24h`)
+- `BBSINTEL_PROBE_INTERVAL` (default `30m`)
 - `BBSINTEL_PROBE_CONCURRENCY` (default `8`)
 
-## Import BBS directory data
+## One-shot commands
+
+Import BBS directory data:
 
 ```sh
 go run ./cmd/bbsintel import telnetbbsguide
 ```
 
-The import is idempotent for known source entries and endpoints.
-
-## Probe imported endpoints
+Probe imported endpoints:
 
 ```sh
 go run ./cmd/bbsintel probe
 ```
 
-The worker probes Telnet endpoints concurrently and appends each result to `probe_result`. Re-running it builds availability history instead of overwriting prior checks.
+Run only the scheduler without the HTTP API:
+
+```sh
+go run ./cmd/bbsintel scheduler
+```
+
+Imports are idempotent for known source entries and endpoints. Probe runs append to `probe_result`, building availability history instead of overwriting previous checks.
 
 ## API
 
@@ -68,11 +80,11 @@ The worker probes Telnet endpoints concurrently and appends each result to `prob
 docker compose up --build
 ```
 
-Persistent data lives under `/data` in the container.
+Persistent data lives under `/data` in the container. Compose enables the built-in scheduler with the default 24-hour import and 30-minute probe cadence.
 
 ## Roadmap
 
-Planned next steps include scheduled imports and probing, richer Telnet negotiation, software fingerprinting, SSH/RLogin probes, uptime analytics, feeds, and a web UI.
+Planned next steps include backoff for repeatedly unavailable systems, richer Telnet negotiation, software fingerprinting, SSH/RLogin probes, uptime analytics, feeds, and a web UI.
 
 ## License
 
