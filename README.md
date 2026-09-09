@@ -18,13 +18,15 @@ It aggregates public BBS directories, normalizes and deduplicates entries, probe
 - source health and change events
 - derived alerts with filtering, statistics, `since`, and cursor pagination
 - reported vs observed software provenance
-- status history
-- sample-based uptime analytics
-- built-in scheduler
+- status history and rollups
+- materialized public statistics
+- built-in scheduler with separate worker mode
 - adaptive probe backoff
-- REST API
+- REST API with bounded cursor pagination
+- Prometheus-compatible metrics
+- SQLite backup, restore, integrity, and retention maintenance
+- Caddy-fronted production Compose deployment
 - OCI image
-- Docker Compose
 - GitHub Actions CI, live qualification, and release workflow
 
 ## Directory sources
@@ -91,7 +93,7 @@ The default server mode starts both the HTTP API and the scheduler. On startup t
 
 Defaults: listen on `:8080`, database at `./data/bbsintel.db`.
 
-Environment variables:
+Environment variables include:
 
 - `BBSINTEL_LISTEN`
 - `BBSINTEL_DB`
@@ -99,6 +101,8 @@ Environment variables:
 - `BBSINTEL_IMPORT_INTERVAL` (default `24h`)
 - `BBSINTEL_PROBE_INTERVAL` (default `30m`)
 - `BBSINTEL_PROBE_CONCURRENCY` (default `8`)
+- `BBSINTEL_RAW_RETENTION` (maintenance default `90d`)
+- `BBSINTEL_HTTP_MAX_INFLIGHT` (default `64`)
 
 ## Adaptive probe cadence
 
@@ -123,46 +127,56 @@ Directory metadata remains separate from live observations:
 
 Observed values never overwrite source-reported values. Per-source software claims are available through the source provenance API.
 
-## Uptime analytics
+## Uptime and public statistics
 
 BBSIntel calculates sample-based uptime from stored probe results. `uptime_pct` is the percentage of completed probes in the requested window whose status was `online`; it is not presented as continuous time-weighted monitoring between probes.
 
-The analytics endpoint exposes:
+Raw probe history is summarized into hourly and daily rollups. Public inventory and runtime statistics are materialized so read-heavy public API traffic does not repeatedly scan the raw probe table. Public dimensions currently cover software, protocol, country, and source, plus BBS lifecycle statistics.
 
-- `first_seen` and `last_seen`
-- `first_probe` and `last_probe`
-- `last_online`
-- `status_changes`
-- `uptime_24h`, `uptime_7d`, and `uptime_30d`
-- check counts and online-check counts for each uptime window
+## One-shot and maintenance commands
 
-Status-change counts are calculated independently per endpoint so multiple protocols on one BBS do not create artificial transitions.
-
-## One-shot commands
-
-Import Telnet BBS Guide data:
+Import directory data:
 
 ```sh
 go run ./cmd/bbsintel import telnetbbsguide
-```
-
-Import the Synchronet directory:
-
-```sh
 go run ./cmd/bbsintel import synchronet
 ```
 
-Probe endpoints that are currently due:
+Probe endpoints currently due:
 
 ```sh
 go run ./cmd/bbsintel probe
 ```
 
-Run only the scheduler without the HTTP API:
+Run only the scheduler without HTTP:
 
 ```sh
 go run ./cmd/bbsintel scheduler
 ```
+
+Refresh rollups/materialized statistics and prune retained raw probes:
+
+```sh
+go run ./cmd/bbsintel maintenance rollup
+go run ./cmd/bbsintel maintenance prune
+go run ./cmd/bbsintel maintenance all
+```
+
+Check and back up SQLite:
+
+```sh
+go run ./cmd/bbsintel maintenance check
+go run ./cmd/bbsintel maintenance check full
+go run ./cmd/bbsintel maintenance backup ./backups/bbsintel.db
+```
+
+Restore is an offline operation; stop web/worker first:
+
+```sh
+go run ./cmd/bbsintel maintenance restore ./backups/bbsintel.db
+```
+
+See `docs/BACKUP_RESTORE.md` for the production recovery procedure.
 
 Show build/release information:
 
@@ -172,13 +186,13 @@ go run ./cmd/bbsintel --version
 go run ./cmd/bbsintel version
 ```
 
-The scheduler imports all configured directory adapters. Imports are idempotent for known source entries and endpoints. Probe runs append to `probe_result`, building availability history instead of overwriting previous checks.
-
 ## API
 
-- `GET /healthz`
+- `GET /healthz` — process liveness
+- `GET /readyz` — database-backed readiness
+- `GET /metrics` — Prometheus-compatible operational metrics; keep private in public deployments
 - `GET /api/v1/version` — version, commit, and build date
-- `GET /api/v1/bbs` — BBS list including latest endpoint status and software provenance
+- `GET /api/v1/bbs` — bounded cursor-paginated BBS inventory with search/filter support
 - `GET /api/v1/bbs/{id}` — BBS details and latest status/fingerprint for each endpoint
 - `GET /api/v1/bbs/{id}/sources` — source-specific metadata and presence state
 - `GET /api/v1/bbs/{id}/intelligence` — source disagreement summary and comparison with observed software
@@ -188,26 +202,39 @@ The scheduler imports all configured directory adapters. Imports are idempotent 
 - `GET /api/v1/events` and `GET /api/v1/bbs/{id}/events` — change feeds with `since` and opaque cursor pagination
 - `GET /api/v1/alerts` — deduplicated current alerts with severity/category/source/BBS filters, `since`, and cursor pagination
 - `GET /api/v1/alerts/stats` — alert totals grouped by severity, category, and source
-- `GET /api/v1/sources/health` — import telemetry, live freshness classification, and persisted scheduler-observed state
-- `GET /api/v1/stats` — inventory, probe count, latest-status totals, and software mismatch count
+- `GET /api/v1/sources/health` — import telemetry, freshness classification, and persisted scheduler-observed state
+- `GET /api/v1/stats` — materialized inventory/runtime status snapshot
+- `GET /api/v1/statistics/daily?days=N` — daily probe rollups
+- `GET /api/v1/statistics/dimensions/{software|protocol|country|source}` — public inventory dimensions
+- `GET /api/v1/statistics/lifecycle?days=N` — new/disappeared/returned BBS statistics
 
-## Container
+## Production Compose with Caddy
+
+BBSIntel is intended to run behind a reverse proxy for public deployments. The included Compose stack uses Caddy as the only public service and keeps `bbsintel-web:8080` internal.
 
 ```sh
-docker compose up --build
+cp .env.example .env
+# edit BBSINTEL_DOMAIN, for example bbs.example.org
+docker compose up -d --build
 ```
 
-Persistent data lives under `/data` in the container. Compose enables the built-in scheduler with the default 24-hour import and 30-minute probe cadence.
+Caddy publishes ports 80 and 443, provides automatic TLS, zstd/gzip compression, JSON access logging, security headers, and blocks public access to `/metrics`. Web and worker share a local named SQLite volume; the worker is isolated on its own internal Docker network.
+
+SQLite is the recommended v0.1.0 database for this single-host topology. Do not put the database on NFS/network storage. PostgreSQL is intentionally deferred until multi-host deployment, multiple concurrent writers, HA/replication, or measured SQLite contention makes it useful.
+
+See `docs/REVERSE_PROXY.md` and `docs/BACKUP_RESTORE.md` for deployment and recovery details.
 
 Release tags publish a multi-architecture image for `linux/amd64` and `linux/arm64` to `ghcr.io/ploos-as/bbsintel`. When `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` repository secrets are configured, the release workflow also publishes `${DOCKERHUB_USERNAME}/bbsintel` to Docker Hub.
 
 ## v0.1.0 qualification
 
-The pre-release live qualification imported 909 Telnet BBS Guide entries and 356 Synchronet entries, producing 1,026 BBS identities and 1,132 endpoints after deduplication. A bounded 20-endpoint passive probe sample and API smoke suite also passed. See `docs/M1_10_PRE_RELEASE_QUALIFICATION.md` for the recorded qualification results.
+The final pre-release live qualification on 2026-09-09 imported 909 Telnet BBS Guide entries and 356 Synchronet entries, producing 1,026 BBS identities and 1,133 endpoints after deduplication (947 Telnet, 186 SSH). A bounded 20-endpoint passive sample produced 8 `online`, 8 `telnet_only`, 2 `tcp_only`, and 2 `offline` results. Materialized statistics, API/metrics smoke tests, SQLite integrity/backup, production Compose validation, and Caddy validation all passed.
+
+See `docs/M1_12_RELEASE_READINESS.md` for the final release-readiness record and `docs/M1_10_PRE_RELEASE_QUALIFICATION.md` for the earlier probe-hardening qualification.
 
 ## Roadmap
 
-Planned next steps include additional directory adapters, RLogin/raw-TCP support, richer feeds, and a web UI.
+Planned next steps include additional directory adapters, RLogin/raw-TCP support, richer feeds, web UI work, and PostgreSQL support if deployment scale eventually requires it.
 
 ## License
 
