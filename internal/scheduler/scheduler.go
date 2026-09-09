@@ -11,6 +11,7 @@ import (
 	"github.com/Ploos-AS/BBSIntel/internal/ingest"
 	"github.com/Ploos-AS/BBSIntel/internal/probe"
 	"github.com/Ploos-AS/BBSIntel/internal/source"
+	"github.com/Ploos-AS/BBSIntel/internal/sourcehealth"
 )
 
 type Config struct {
@@ -39,6 +40,9 @@ func (s Scheduler) Run(ctx context.Context) error {
 	if err := s.importOnce(ctx); err != nil {
 		log.Printf("initial import failed: %v", err)
 	}
+	if err := s.evaluateSourceHealth(ctx); err != nil {
+		log.Printf("initial source health evaluation failed: %v", err)
+	}
 	if err := s.probeOnce(ctx, cfg.Concurrency, cfg.ProbeInterval); err != nil {
 		log.Printf("initial probe failed: %v", err)
 	}
@@ -56,9 +60,15 @@ func (s Scheduler) Run(ctx context.Context) error {
 			if err := s.importOnce(ctx); err != nil {
 				log.Printf("scheduled import failed: %v", err)
 			}
+			if err := s.evaluateSourceHealth(ctx); err != nil {
+				log.Printf("scheduled source health evaluation failed: %v", err)
+			}
 		case <-probeTicker.C:
 			if err := s.probeOnce(ctx, cfg.Concurrency, cfg.ProbeInterval); err != nil {
 				log.Printf("scheduled probe failed: %v", err)
+			}
+			if err := s.evaluateSourceHealth(ctx); err != nil {
+				log.Printf("scheduled source health evaluation failed: %v", err)
 			}
 		}
 	}
@@ -87,5 +97,16 @@ func (s Scheduler) probeOnce(ctx context.Context, concurrency int, baseInterval 
 		return err
 	}
 	log.Printf("scheduled probe completed: %d endpoints probed", n)
+	return nil
+}
+
+func (s Scheduler) evaluateSourceHealth(ctx context.Context) error {
+	n, err := sourcehealth.EvaluateAll(ctx, s.DB, time.Now().UTC())
+	if err != nil {
+		return err
+	}
+	if n > 0 {
+		log.Printf("source health transitions: %d", n)
+	}
 	return nil
 }
