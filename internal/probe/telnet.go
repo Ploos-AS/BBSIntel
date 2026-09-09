@@ -16,13 +16,15 @@ import (
 )
 
 type Result struct {
-	Status           string `json:"status"`
-	ConnectMS        int64  `json:"connect_ms"`
-	BannerBytes      int    `json:"banner_bytes"`
-	BannerSHA256     string `json:"banner_sha256,omitempty"`
-	BannerPreview    string `json:"banner_preview,omitempty"`
-	DetectedSoftware string `json:"detected_software,omitempty"`
-	Error            string `json:"error,omitempty"`
+	Status             string  `json:"status"`
+	ConnectMS          int64   `json:"connect_ms"`
+	BannerBytes        int     `json:"banner_bytes"`
+	BannerSHA256       string  `json:"banner_sha256,omitempty"`
+	BannerPreview      string  `json:"banner_preview,omitempty"`
+	DetectedSoftware   string  `json:"detected_software,omitempty"`
+	SoftwareConfidence float64 `json:"software_confidence,omitempty"`
+	SoftwareEvidence   string  `json:"software_evidence,omitempty"`
+	Error              string  `json:"error,omitempty"`
 }
 
 var ansiRE = regexp.MustCompile(`\x1b\[[0-?]*[ -/]*[@-~]`)
@@ -49,13 +51,16 @@ func Telnet(ctx context.Context, hostname string, port int) Result {
 		clean := cleanTelnetBanner(buf[:n])
 		sum := sha256.Sum256(clean)
 		preview := bannerPreview(clean, 240)
+		software, confidence, evidence := detectSoftware(preview)
 		return Result{
-			Status:           "online",
-			ConnectMS:        connectMS,
-			BannerBytes:      n,
-			BannerSHA256:     hex.EncodeToString(sum[:]),
-			BannerPreview:    preview,
-			DetectedSoftware: detectSoftware(preview),
+			Status:             "online",
+			ConnectMS:          connectMS,
+			BannerBytes:        n,
+			BannerSHA256:       hex.EncodeToString(sum[:]),
+			BannerPreview:      preview,
+			DetectedSoftware:   software,
+			SoftwareConfidence: confidence,
+			SoftwareEvidence:   evidence,
 		}
 	}
 	if err != nil && !errors.Is(err, io.EOF) {
@@ -121,30 +126,33 @@ func bannerPreview(in []byte, limit int) string {
 	return s
 }
 
-func detectSoftware(preview string) string {
+func detectSoftware(preview string) (string, float64, string) {
 	s := strings.ToLower(preview)
-	signatures := []struct {
-		needle string
-		name   string
-	}{
-		{"synchronet", "Synchronet"},
-		{"mystic bbs", "Mystic"},
-		{"mystic", "Mystic"},
-		{"enigma 1/2", "ENiGMA 1/2"},
-		{"enigma1/2", "ENiGMA 1/2"},
-		{"wwiv", "WWIV"},
-		{"renegade bbs", "Renegade"},
-		{"telegard", "Telegard"},
-		{"wildcat!", "Wildcat!"},
-		{"pcboard", "PCBoard"},
-		{"majorbbs", "MajorBBS"},
-		{"worldgroup", "Worldgroup"},
-		{"citadel", "Citadel"},
+	type signature struct {
+		needle     string
+		name       string
+		confidence float64
+	}
+	signatures := []signature{
+		{"synchronet bbs", "Synchronet", 0.99},
+		{"synchronet", "Synchronet", 0.95},
+		{"mystic bbs", "Mystic", 0.99},
+		{"mystic", "Mystic", 0.90},
+		{"enigma 1/2", "ENiGMA 1/2", 0.99},
+		{"enigma1/2", "ENiGMA 1/2", 0.99},
+		{"wwiv", "WWIV", 0.95},
+		{"renegade bbs", "Renegade", 0.99},
+		{"telegard", "Telegard", 0.95},
+		{"wildcat!", "Wildcat!", 0.95},
+		{"pcboard", "PCBoard", 0.95},
+		{"majorbbs", "MajorBBS", 0.95},
+		{"worldgroup", "Worldgroup", 0.95},
+		{"citadel", "Citadel", 0.85},
 	}
 	for _, sig := range signatures {
 		if strings.Contains(s, sig.needle) {
-			return sig.name
+			return sig.name, sig.confidence, sig.needle
 		}
 	}
-	return ""
+	return "", 0, ""
 }
